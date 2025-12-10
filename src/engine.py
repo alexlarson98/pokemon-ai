@@ -70,12 +70,16 @@ class PokemonEngine:
             return self._get_setup_actions(state)
         elif state.current_phase == GamePhase.MULLIGAN:
             return self._get_mulligan_actions(state)
-        elif state.current_phase == GamePhase.DRAW:
-            return self._get_draw_actions(state)
         elif state.current_phase == GamePhase.MAIN:
             return self._get_main_phase_actions(state)
+        elif state.current_phase == GamePhase.DRAW:
+            # DRAW phase is now atomic - should never pause here
+            # If we reach this state, something is wrong
+            return []
         elif state.current_phase == GamePhase.ATTACK:
-            return self._get_attack_phase_actions(state)
+            # ATTACK phase is now merged into MAIN phase
+            # This should not be reached in normal gameplay
+            return []
         elif state.current_phase == GamePhase.CLEANUP:
             return []  # Auto-resolved by engine
         else:
@@ -136,19 +140,30 @@ class PokemonEngine:
         Actions:
         - Place Active Pokémon (from Basic Pokémon in hand)
         - Place Bench Pokémon (up to 5)
+
+        MCTS Optimization: Deduplicates by card name.
         """
+        from cards.registry import create_card
+
         player = state.get_active_player()
         actions = []
 
-        # Get all Basic Pokémon in hand
-        basic_pokemon = [
-            card for card in player.hand.cards
-            if Subtype.BASIC in self._get_card_subtypes(card)
-        ]
+        # Get unique Basic Pokémon by name (MCTS deduplication)
+        seen_names = set()
+        unique_basic_pokemon = []
+
+        for card in player.hand.cards:
+            if Subtype.BASIC in self._get_card_subtypes(card):
+                card_def = create_card(card.card_id)
+                card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
+
+                if card_name not in seen_names:
+                    seen_names.add(card_name)
+                    unique_basic_pokemon.append(card)
 
         # Must place Active first
         if not player.has_active_pokemon():
-            for card in basic_pokemon:
+            for card in unique_basic_pokemon:
                 actions.append(Action(
                     action_type=ActionType.PLACE_ACTIVE,
                     player_id=player.player_id,
@@ -158,7 +173,7 @@ class PokemonEngine:
             # Can place on Bench (up to max_bench_size)
             max_bench = self.get_max_bench_size(state, player)
             if player.board.get_bench_count() < max_bench:
-                for card in basic_pokemon:
+                for card in unique_basic_pokemon:
                     actions.append(Action(
                         action_type=ActionType.PLACE_BENCH,
                         player_id=player.player_id,
@@ -195,16 +210,6 @@ class PokemonEngine:
             )
         ]
 
-    def _get_draw_actions(self, state: GameState) -> List[Action]:
-        """
-        Draw Phase (Constitution Section 2, Phase 1).
-
-        Forced action: Active player draws 1 card.
-        Returns empty list (auto-resolved by engine).
-        """
-        # This phase is auto-resolved in step()
-        return []
-
     def _get_main_phase_actions(self, state: GameState) -> List[Action]:
         """
         Main Phase (Constitution Section 2, Phase 2).
@@ -215,7 +220,8 @@ class PokemonEngine:
         - Evolve Pokémon (unlimited, subject to evolution sickness)
         - Use Abilities (unlimited, unless "once per turn")
         - Retreat (once per turn)
-        - Advance to Attack Phase
+        - Attack (if able)
+        - Pass Turn (end turn without attacking)
         """
         player = state.get_active_player()
         actions = []
@@ -225,19 +231,26 @@ class PokemonEngine:
             energy_actions = self._get_attach_energy_actions(state)
             actions.extend(energy_actions)
 
-        # ACTION 2: Play Basic Pokémon to Bench
+        # ACTION 2: Play Basic Pokémon to Bench (with deduplication)
         max_bench = self.get_max_bench_size(state, player)
         if player.board.get_bench_count() < max_bench:
-            basic_pokemon = [
-                card for card in player.hand.cards
-                if Subtype.BASIC in self._get_card_subtypes(card)
-            ]
-            for card in basic_pokemon:
-                actions.append(Action(
-                    action_type=ActionType.PLAY_BASIC,
-                    player_id=player.player_id,
-                    card_id=card.id
-                ))
+            # MCTS Optimization: Deduplicate by card name
+            from cards.registry import create_card
+            seen_basic_names = set()
+
+            for card in player.hand.cards:
+                if Subtype.BASIC in self._get_card_subtypes(card):
+                    card_def = create_card(card.card_id)
+                    card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
+
+                    # Only add one action per unique card name
+                    if card_name not in seen_basic_names:
+                        seen_basic_names.add(card_name)
+                        actions.append(Action(
+                            action_type=ActionType.PLAY_BASIC,
+                            player_id=player.player_id,
+                            card_id=card.id
+                        ))
 
         # ACTION 3: Evolve Pokémon
         evolution_actions = self._get_evolution_actions(state)
@@ -256,11 +269,17 @@ class PokemonEngine:
             retreat_actions = self._get_retreat_actions(state)
             actions.extend(retreat_actions)
 
-        # ACTION 7: Advance to Attack Phase
+        # ACTION 7: Attack Actions (squashed from ATTACK phase)
+        if player.has_active_pokemon():
+            active = player.board.active_spot
+            attack_actions = self._get_attack_actions(state, active)
+            actions.extend(attack_actions)
+
+        # ACTION 8: Pass Turn (end turn without attacking)
         actions.append(Action(
             action_type=ActionType.END_TURN,
             player_id=player.player_id,
-            metadata={"advance_to_attack": True}
+            metadata={"pass_turn": True}
         ))
 
         return actions
@@ -313,20 +332,45 @@ class PokemonEngine:
     # ========================================================================
 
     def _get_attach_energy_actions(self, state: GameState) -> List[Action]:
-        """Generate energy attachment actions."""
+        """
+        Generate energy attachment actions.
+
+        MCTS Optimization: Only one action per unique energy card name per target.
+        This prevents action space explosion when holding multiple copies.
+        """
+        from cards.registry import create_card
+
         player = state.get_active_player()
         actions = []
 
-        # Find energy cards in hand
-        energy_cards = [
-            card for card in player.hand.cards
-            if card.card_id.startswith("energy-")  # Simple heuristic
-        ]
+        # Find unique energy cards by name (deduplication for MCTS)
+        seen_energy_names = set()
+        unique_energy_cards = []
+
+        for card in player.hand.cards:
+            card_def = create_card(card.card_id)
+            if card_def:
+                # Check supertype from json_data (for DataDrivenCards)
+                supertype = None
+                if hasattr(card_def, 'supertype'):
+                    supertype = card_def.supertype
+                elif hasattr(card_def, 'json_data') and 'supertype' in card_def.json_data:
+                    supertype = card_def.json_data['supertype']
+
+                if supertype and supertype.lower() == 'energy':
+                    # Get card name for deduplication
+                    card_name = card_def.name if hasattr(card_def, 'name') else card.card_id
+
+                    # Only add one representative per unique card name
+                    if card_name not in seen_energy_names:
+                        seen_energy_names.add(card_name)
+                        unique_energy_cards.append(card)
 
         # Can attach to any Pokémon in play
         targets = player.board.get_all_pokemon()
 
-        for energy in energy_cards:
+        # Generate one action per unique energy type per target
+        for energy in unique_energy_cards:
             for target in targets:
                 actions.append(Action(
                     action_type=ActionType.ATTACH_ENERGY,
@@ -345,7 +389,12 @@ class PokemonEngine:
         - Cannot evolve on Turn 1 (either player)
         - Cannot evolve on same turn Pokémon was played (evolution sickness)
         - Can evolve multiple Pokémon per turn
+
+        MCTS Optimization: Deduplicates source (hand) but preserves targets (board).
+        2 Charmeleons in hand + 3 Charmanders on board = 3 actions (not 6).
         """
+        from cards.registry import create_card
+
         player = state.get_active_player()
         actions = []
 
@@ -353,17 +402,26 @@ class PokemonEngine:
         if state.turn_count == 1:
             return actions
 
-        # Find evolution cards in hand
-        evolution_cards = [
-            card for card in player.hand.cards
-            if Subtype.STAGE_1 in self._get_card_subtypes(card) or
-               Subtype.STAGE_2 in self._get_card_subtypes(card)
-        ]
+        # Deduplicate evolution cards by name (source deduplication)
+        seen_evo_names = set()
+        unique_evolution_cards = []
 
-        # Find valid targets (Pokémon that can be evolved)
+        for card in player.hand.cards:
+            subtypes = self._get_card_subtypes(card)
+            if Subtype.STAGE_1 in subtypes or Subtype.STAGE_2 in subtypes:
+                card_def = create_card(card.card_id)
+                card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
+
+                # Only add one representative per unique evolution card name
+                if card_name not in seen_evo_names:
+                    seen_evo_names.add(card_name)
+                    unique_evolution_cards.append(card)
+
+        # Find valid targets (Pokémon that can be evolved) - preserve ALL targets
         targets = player.board.get_all_pokemon()
 
-        for evo_card in evolution_cards:
+        # Generate actions: 1 source card × all valid targets
+        for evo_card in unique_evolution_cards:
             for target in targets:
                 # Check evolution sickness (turns_in_play > 0)
                 if target.turns_in_play > 0:
@@ -387,34 +445,49 @@ class PokemonEngine:
         - Supporter: Once per turn (cannot play on Turn 1 going first)
         - Stadium: Once per turn (must have different name than current)
         - Tool: Attached to Pokémon
+
+        MCTS Optimization: Deduplicates source (hand) but preserves targets (Tools).
+        2 Muscle Bands in hand + 3 Pokémon on board = 3 Tool actions (not 6).
         """
+        from cards.registry import create_card
+
         player = state.get_active_player()
         actions = []
 
+        # Deduplicate by card name for each subtype
+        seen_items = set()
+        seen_supporters = set()
+        seen_stadiums = set()
+        seen_tools = set()
+
         for card in player.hand.cards:
             subtypes = self._get_card_subtypes(card)
+            card_def = create_card(card.card_id)
+            card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
-            # ITEM: Unlimited
-            if Subtype.ITEM in subtypes:
+            # ITEM: Unlimited (deduplicate by name)
+            if Subtype.ITEM in subtypes and card_name not in seen_items:
+                seen_items.add(card_name)
                 actions.append(Action(
                     action_type=ActionType.PLAY_ITEM,
                     player_id=player.player_id,
                     card_id=card.id
                 ))
 
-            # SUPPORTER: Once per turn, not on Turn 1 going first
-            if Subtype.SUPPORTER in subtypes:
+            # SUPPORTER: Once per turn, not on Turn 1 going first (deduplicate by name)
+            if Subtype.SUPPORTER in subtypes and card_name not in seen_supporters:
                 if not player.supporter_played_this_turn:
                     # Constitution: No Supporter on Turn 1 going first
                     if not (state.turn_count == 1 and state.active_player_index == 0):
+                        seen_supporters.add(card_name)
                         actions.append(Action(
                             action_type=ActionType.PLAY_SUPPORTER,
                             player_id=player.player_id,
                             card_id=card.id
                         ))
 
-            # STADIUM: Once per turn, must have different name
-            if Subtype.STADIUM in subtypes:
+            # STADIUM: Once per turn, must have different name (deduplicate by name)
+            if Subtype.STADIUM in subtypes and card_name not in seen_stadiums:
                 if not player.stadium_played_this_turn:
                     # Check if different from current stadium
                     can_play = True
@@ -425,14 +498,16 @@ class PokemonEngine:
                             can_play = False
 
                     if can_play:
+                        seen_stadiums.add(card_name)
                         actions.append(Action(
                             action_type=ActionType.PLAY_STADIUM,
                             player_id=player.player_id,
                             card_id=card.id
                         ))
 
-            # TOOL: Attach to Pokémon
-            if Subtype.TOOL in subtypes:
+            # TOOL: Attach to Pokémon (deduplicate source, preserve targets)
+            if Subtype.TOOL in subtypes and card_name not in seen_tools:
+                seen_tools.add(card_name)
                 targets = player.board.get_all_pokemon()
                 for target in targets:
                     # TODO: Check if target already has a Tool
@@ -482,12 +557,16 @@ class PokemonEngine:
         Generate retreat actions.
 
         Rules:
-        - Once per turn
-        - Must discard Energy equal to Retreat Cost
+        - Once per turn (checked via retreated_this_turn flag)
+        - Must have enough Energy attached to pay retreat cost
         - Cannot retreat if Asleep or Paralyzed (Constitution Section 6)
         """
         player = state.get_active_player()
         actions = []
+
+        # Check if already retreated this turn
+        if player.retreated_this_turn:
+            return actions
 
         if not player.has_active_pokemon():
             return actions
@@ -504,8 +583,24 @@ class PokemonEngine:
         if player.board.get_bench_count() == 0:
             return actions
 
-        # TODO: Check retreat cost and available energy
-        # For now, generate retreat action if bench exists
+        # Get retreat cost from card definition
+        from cards.registry import create_card
+        card_def = create_card(active.card_id)
+
+        if not card_def:
+            return actions
+
+        # Get retreat cost (number of energy to discard)
+        retreat_cost = len(card_def.retreat_cost) if hasattr(card_def, 'retreat_cost') and card_def.retreat_cost else 0
+
+        # Count attached energy
+        attached_energy_count = len(active.attached_energy) if active.attached_energy else 0
+
+        # RULE: Must have enough energy to pay retreat cost
+        if attached_energy_count < retreat_cost:
+            return actions  # Not enough energy to retreat
+
+        # Generate retreat actions for each benched Pokémon
         for i, pokemon in enumerate(player.board.bench):
             if pokemon is not None:
                 actions.append(Action(
@@ -513,7 +608,7 @@ class PokemonEngine:
                     player_id=player.player_id,
                     card_id=active.id,
                     target_id=pokemon.id,
-                    metadata={"bench_index": i}
+                    metadata={"bench_index": i, "retreat_cost": retreat_cost}
                 ))
 
         return actions
@@ -523,12 +618,17 @@ class PokemonEngine:
         Generate attack actions for Active Pokémon.
 
         Rules:
+        - Turn 1 Rule: Player going first cannot attack on turn 1
         - Must have sufficient Energy to pay cost
         - Check for attack effects (e.g., "cannot attack next turn")
-        - Validate attack logic exists in logic_registry
+        - Check status conditions (Asleep, Paralyzed)
         """
         player = state.get_active_player()
         actions = []
+
+        # RULE: Turn 1 - Player going first cannot attack
+        if state.turn_count == 1 and player.player_id == 0:
+            return actions  # No attacks on turn 1 for player going first
 
         # Check if Pokémon can attack
         if "cannot_attack_next_turn" in active.attack_effects:
@@ -540,16 +640,30 @@ class PokemonEngine:
         if StatusCondition.PARALYZED in active.status_conditions:
             return actions  # Paralyzed Pokémon cannot attack
 
-        # TODO: Query card definition for attacks and energy costs
-        # For now, create placeholder attack action
-        # When implemented, validate using: logic_registry.get_card_logic(active.card_id, attack_name)
-        actions.append(Action(
-            action_type=ActionType.ATTACK,
-            player_id=player.player_id,
-            card_id=active.id,
-            attack_name="attack_1",  # Placeholder
-            metadata={"target": "opponent_active"}
-        ))
+        # Get card definition to check attacks and energy costs
+        from cards.registry import create_card
+        card_def = create_card(active.card_id)
+
+        if not card_def or not hasattr(card_def, 'attacks'):
+            return actions
+
+        # Check each attack for energy requirements
+        for attack in card_def.attacks:
+            # Count attached energy
+            attached_energy_count = len(active.attached_energy) if active.attached_energy else 0
+
+            # Get energy cost (converted_energy_cost is the total number of energy required)
+            energy_cost = getattr(attack, 'converted_energy_cost', 0)
+
+            # RULE: Must have enough energy attached
+            if attached_energy_count >= energy_cost:
+                actions.append(Action(
+                    action_type=ActionType.ATTACK,
+                    player_id=player.player_id,
+                    card_id=active.id,
+                    attack_name=attack.name,
+                    metadata={"target": "opponent_active", "energy_cost": energy_cost}
+                ))
 
         return actions
 
@@ -686,18 +800,19 @@ class PokemonEngine:
 
     def _apply_evolve(self, state: GameState, action: Action) -> GameState:
         """Evolve a Pokémon."""
-        player = state.get_player(action.player_id)
-        evolution_card = player.hand.remove_card(action.card_id)
+        from actions import evolve_pokemon
 
-        if evolution_card:
-            # Find target Pokémon
-            target = self._find_pokemon_by_id(player, action.target_id)
-            if target:
-                # TODO: Implement evolution logic
-                # - Transfer energy/tools/damage
-                # - Update evolution chain
-                # - Replace card
-                pass
+        try:
+            state = evolve_pokemon(
+                state=state,
+                player_id=action.player_id,
+                target_pokemon_id=action.target_id,
+                evolution_card_id=action.card_id,
+                skip_stage=False
+            )
+        except ValueError as e:
+            # Evolution failed (invalid stage, etc.) - put card back in hand
+            print(f"[Evolution Failed] {e}")
 
         return state
 
@@ -748,13 +863,34 @@ class PokemonEngine:
 
         Constitution Section 5: Removes status conditions and attack effects.
         """
+        from cards.registry import create_card
+
         player = state.get_player(action.player_id)
 
         if player.board.active_spot:
-            # TODO: Discard Energy equal to retreat cost
+            active = player.board.active_spot
+
+            # Get retreat cost from card definition
+            card_def = create_card(active.card_id)
+            retreat_cost = 0
+
+            if card_def and hasattr(card_def, 'get_retreat_cost'):
+                retreat_cost = card_def.get_retreat_cost(state, active)
+            elif card_def and hasattr(card_def, 'base_retreat_cost'):
+                retreat_cost = card_def.base_retreat_cost
+            elif card_def and hasattr(card_def, 'json_data') and 'retreatCost' in card_def.json_data:
+                retreat_cost = len(card_def.json_data['retreatCost'])
+
+            # Discard energy equal to retreat cost
+            if retreat_cost > 0:
+                energy_to_discard = min(retreat_cost, len(active.attached_energy))
+
+                for _ in range(energy_to_discard):
+                    if active.attached_energy:
+                        energy = active.attached_energy.pop(0)
+                        player.discard.add_card(energy)
 
             # Apply "Switch" effect (Constitution Section 5)
-            active = player.board.active_spot
             active.status_conditions.clear()  # Remove all status conditions
             active.attack_effects.clear()  # Remove attack effects
 
@@ -848,12 +984,18 @@ class PokemonEngine:
             state.current_phase = GamePhase.DRAW
             return state
 
-        if action.metadata.get("advance_to_attack", False):
-            # Main phase complete, advance to attack
-            state.current_phase = GamePhase.ATTACK
+        if action.metadata.get("pass_turn", False):
+            # Pass turn (no attack), advance to cleanup
+            state.current_phase = GamePhase.CLEANUP
             return state
 
-        # Attack phase complete or skipped, advance to cleanup
+        # Legacy support: advance_to_attack is now obsolete (phase squashing)
+        if action.metadata.get("advance_to_attack", False):
+            # This should not happen with squashed phases, but handle gracefully
+            state.current_phase = GamePhase.CLEANUP
+            return state
+
+        # Default: advance to cleanup
         state.current_phase = GamePhase.CLEANUP
         return state
 
@@ -863,7 +1005,10 @@ class PokemonEngine:
 
     def resolve_phase_transition(self, state: GameState) -> GameState:
         """
-        Auto-resolve phase transitions and cleanup.
+        Auto-resolve phase transitions with atomic fall-through logic.
+
+        ATOMIC TURN CYCLE: Cleanup -> Draw -> Main Phase (single step)
+        This ensures MCTS never sees an empty action space in DRAW phase.
 
         Constitution Section 2: Turn Structure
         - Apply status damage (Poison, Burn)
@@ -871,43 +1016,46 @@ class PokemonEngine:
         - Reset turn flags
         - Increment turn counters
         - Switch active player
+        - Draw card (atomic)
+        - Enter Main Phase
         """
+        # Step 1: Handle CLEANUP phase
         if state.current_phase == GamePhase.CLEANUP:
-            # Step 1: Apply status condition damage (between turns)
+            # Apply status condition damage (between turns)
             state = self._apply_status_damage(state)
 
-            # Step 2: Check for KOs
+            # Check for KOs
             state = self._check_all_knockouts(state)
 
-            # Step 2.5: Remove expired effects
+            # Remove expired effects
             state = self._resolve_effect_expiration(state)
 
-            # Step 3: Move turn metadata to last_turn_metadata (for cards like Fezandipiti ex)
+            # Move turn metadata to last_turn_metadata (for cards like Fezandipiti ex)
             state.last_turn_metadata = state.turn_metadata.copy()
             state.turn_metadata = {}
 
-            # Step 4: Reset turn flags
+            # Reset turn flags
             active_player = state.get_active_player()
             active_player.reset_turn_flags()
 
-            # Step 5: Increment turns_in_play for all Pokémon
+            # Increment turns_in_play for all Pokémon
             for pokemon in active_player.board.get_all_pokemon():
                 pokemon.turns_in_play += 1
                 pokemon.abilities_used_this_turn.clear()
 
-            # Step 6: Switch active player
+            # Switch active player
             state.switch_active_player()
-
-            # Step 7: Advance to Draw phase
-            state.current_phase = GamePhase.DRAW
             state.turn_count += 1
 
-            # Step 8: Auto-execute draw
+            # FALL THROUGH to Draw phase (do not return yet)
+            state.current_phase = GamePhase.DRAW
+
+        # Step 2: Handle DRAW phase (atomic - use 'if' not 'elif' for fall-through)
+        if state.current_phase == GamePhase.DRAW:
+            # Auto-execute draw
             state = self._auto_draw_card(state)
 
-        elif state.current_phase == GamePhase.DRAW:
-            # Draw phase auto-resolves
-            state = self._auto_draw_card(state)
+            # Automatically enter Main Phase
             state.current_phase = GamePhase.MAIN
 
         return state
@@ -1046,10 +1194,12 @@ class PokemonEngine:
             # Deck out - player loses
             state.result = GameResult.PLAYER_1_WIN if player.player_id == 0 else GameResult.PLAYER_0_WIN
             state.winner_id = 1 - player.player_id
+            print(f"\n[Deck Out] Player {player.player_id} cannot draw - deck is empty!")
         else:
             # Draw 1 card
             card = player.deck.cards.pop(0)
             player.hand.add_card(card)
+            print(f"[Draw Phase] Player {player.player_id} draws 1 card (Hand: {len(player.hand.cards)} cards, Deck: {len(player.deck.cards)} remaining)")
 
         return state
 
