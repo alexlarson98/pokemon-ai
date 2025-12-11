@@ -834,6 +834,7 @@ def evolve_pokemon(
     evolution_card.attached_tools = target.attached_tools.copy()
     evolution_card.status_conditions = target.status_conditions.copy()
     evolution_card.turns_in_play = target.turns_in_play
+    evolution_card.evolved_this_turn = True  # Mark as evolved this turn (blocks further evolution)
     evolution_card.evolution_chain = target.evolution_chain + [target.card_id]
     evolution_card.abilities_used_this_turn = target.abilities_used_this_turn.copy()
 

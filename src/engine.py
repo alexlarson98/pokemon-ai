@@ -441,6 +441,10 @@ class PokemonEngine:
                 continue  # Skip if evolves_from is None/empty (data error)
 
             for target in targets:
+                # Check if already evolved this turn (blocks further evolution)
+                if target.evolved_this_turn:
+                    continue  # Cannot evolve again this turn
+
                 # Check evolution sickness (turns_in_play > 0)
                 if target.turns_in_play > 0:
                     # Get target's card definition to check name
@@ -1182,6 +1186,7 @@ class PokemonEngine:
             # Increment turns_in_play for all Pokémon
             for pokemon in active_player.board.get_all_pokemon():
                 pokemon.turns_in_play += 1
+                pokemon.evolved_this_turn = False  # Reset evolution flag for next turn
                 pokemon.abilities_used_this_turn.clear()
 
             # Switch active player

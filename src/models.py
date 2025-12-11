@@ -174,6 +174,7 @@ class CardInstance(BaseModel):
 
     # Temporal state
     turns_in_play: int = Field(0, description="Number of turns since played (for evolution sickness)")
+    evolved_this_turn: bool = Field(False, description="Whether this Pokémon evolved this turn (blocks further evolution)")
     abilities_used_this_turn: Set[str] = Field(default_factory=set, description="Ability names used this turn")
     attack_effects: List[str] = Field(default_factory=list, description="Active attack effects (e.g., 'cannot_attack_next_turn')")
 
