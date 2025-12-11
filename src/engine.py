@@ -1437,8 +1437,18 @@ class PokemonEngine:
         """
         owner = state.get_player(knocked_out.owner_id)
 
-        # Move to discard (with all attached cards)
+        # Move to discard (with all attached cards AND evolution chain)
+        # First, discard all previous evolution stages (the Pokemon Stack)
+        from cards.factory import create_card_instance
+        for prev_card_id in knocked_out.evolution_chain:
+            # Reconstruct the card from its ID and add to discard
+            prev_card = create_card_instance(prev_card_id, owner_id=knocked_out.owner_id)
+            owner.discard.add_card(prev_card)
+
+        # Then discard the top evolution (the current knocked_out card)
         owner.discard.add_card(knocked_out)
+
+        # Finally, discard all attached cards
         for energy in knocked_out.attached_energy:
             owner.discard.add_card(energy)
         for tool in knocked_out.attached_tools:
@@ -1461,6 +1471,98 @@ class PokemonEngine:
 
         # Set metadata flag for history tracking (Fezandipiti ex)
         state.turn_metadata['pokemon_knocked_out'] = True
+
+        return state
+
+    def return_pokemon_to_hand(self, state: GameState, pokemon: CardInstance, owner: PlayerState) -> GameState:
+        """
+        Return a Pokémon (and its entire evolution stack) to the owner's hand.
+
+        Used by: Scoop Up, Super Scoop Up, Acerola, etc.
+
+        This moves:
+        - All previous evolution stages (from evolution_chain)
+        - The top evolution (the pokemon itself)
+        - Does NOT move attached energy/tools (they go to discard)
+
+        Args:
+            state: Current game state
+            pokemon: Pokémon to return to hand
+            owner: Owner of the Pokémon
+
+        Returns:
+            Modified GameState
+        """
+        from cards.factory import create_card_instance
+
+        # Discard all attached energy and tools
+        for energy in pokemon.attached_energy:
+            owner.discard.add_card(energy)
+        for tool in pokemon.attached_tools:
+            owner.discard.add_card(tool)
+
+        # Clear attachments from pokemon
+        pokemon.attached_energy = []
+        pokemon.attached_tools = []
+
+        # Return all previous evolution stages to hand
+        for prev_card_id in pokemon.evolution_chain:
+            prev_card = create_card_instance(prev_card_id, owner_id=pokemon.owner_id)
+            owner.hand.add_card(prev_card)
+
+        # Return the top evolution to hand
+        owner.hand.add_card(pokemon)
+
+        # Remove from board
+        if owner.board.active_spot and owner.board.active_spot.id == pokemon.id:
+            owner.board.active_spot = None
+        else:
+            owner.board.remove_from_bench(pokemon.id)
+
+        return state
+
+    def devolve_pokemon(self, state: GameState, pokemon: CardInstance, owner: PlayerState) -> GameState:
+        """
+        Devolve a Pokémon by one stage (remove top evolution, reveal previous stage).
+
+        Used by: Devolution Spray, Mew ex (Genome Hacking devolution effect), etc.
+
+        This:
+        - Pops the last card from evolution_chain
+        - Changes pokemon.card_id to that previous stage
+        - Returns the current top evolution to owner's hand
+        - Keeps damage counters, energy, and tools attached
+
+        Args:
+            state: Current game state
+            pokemon: Pokémon to devolve
+            owner: Owner of the Pokémon
+
+        Returns:
+            Modified GameState
+
+        Raises:
+            ValueError: If pokemon has no evolution_chain (cannot devolve Basic)
+        """
+        from cards.factory import create_card_instance
+
+        # Check if Pokemon can be devolved
+        if not pokemon.evolution_chain or len(pokemon.evolution_chain) == 0:
+            raise ValueError(f"Cannot devolve Basic Pokémon (no evolution_chain)")
+
+        # Get the previous stage
+        prev_card_id = pokemon.evolution_chain.pop()  # Remove last item from chain
+
+        # Create the current top evolution card to return to hand
+        # (We need to preserve it as a separate card instance)
+        devolved_card = create_card_instance(pokemon.card_id, owner_id=pokemon.owner_id)
+        owner.hand.add_card(devolved_card)
+
+        # Update the pokemon's card_id to the previous stage
+        pokemon.card_id = prev_card_id
+
+        # Keep all other properties (damage, energy, tools, status)
+        # They stay attached to the Pokemon
 
         return state
 
