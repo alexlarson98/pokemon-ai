@@ -23,10 +23,11 @@ from cards.factory import create_card_instance
 
 def parse_deck_string(deck_text: str) -> List[str]:
     """
-    Parse a simple deck string into list of card IDs.
+    Parse a deck string into list of card IDs.
 
-    Format: "{count} {card_name} {card_id}"
-    Example: "4 Charmander sv3-26"
+    Supports two formats:
+    1. Internal format: "4 Charmander sv3-26"
+    2. PTCGL export format: "4 Charmander PAF 7" (converted to "paf-7")
 
     Args:
         deck_text: Deck string
@@ -37,6 +38,8 @@ def parse_deck_string(deck_text: str) -> List[str]:
     Example:
         >>> parse_deck_string("4 Charmander sv3-26\\n2 Fire Energy base1-98")
         ["sv3-26", "sv3-26", "sv3-26", "sv3-26", "base1-98", "base1-98"]
+        >>> parse_deck_string("4 Charmander PAF 7\\n2 Fire Energy MEE 2")
+        ["paf-7", "paf-7", "paf-7", "paf-7", "mee-2", "mee-2"]
     """
     import re
 
@@ -48,14 +51,39 @@ def parse_deck_string(deck_text: str) -> List[str]:
         if not line or line.startswith('#'):
             continue
 
-        # Pattern: {count} {name...} {card_id}
-        # Find card ID at end (format: setcode-number)
-        match = re.search(r'(\d+)\s+.*?\s+([\w\-]+)$', line)
-        if match:
-            count = int(match.group(1))
-            card_id = match.group(2)
+        # Skip PTCGL export headers (e.g., "Pokémon: 23", "Trainer: 30")
+        if ':' in line and not re.search(r'\d+\s+\w', line):
+            continue
 
-            # Add card_id 'count' times
+        # Try PTCGL format first: {count} {name...} {SETCODE} {number}
+        # Example: "4 Dreepy TWM 128" -> "sv6-128" (using set code mapping)
+        ptcgl_match = re.search(r'(\d+)\s+.*?\s+([A-Z]+)\s+(\d+)$', line)
+        if ptcgl_match:
+            from utils.deck_import import normalize_set_code
+
+            count = int(ptcgl_match.group(1))
+            ptcgl_setcode = ptcgl_match.group(2)
+            number = ptcgl_match.group(3)
+
+            # Convert PTCGL setcode to internal format
+            internal_setcode = normalize_set_code(ptcgl_setcode)
+            if internal_setcode:
+                card_id = f"{internal_setcode}-{number}"
+            else:
+                # Fallback: use lowercase PTCGL code
+                card_id = f"{ptcgl_setcode.lower()}-{number}"
+
+            for _ in range(count):
+                card_ids.append(card_id)
+            continue
+
+        # Try internal format: {count} {name...} {setcode-number}
+        # Example: "4 Charmander sv3-26" -> "sv3-26"
+        internal_match = re.search(r'(\d+)\s+.*?\s+([\w\-]+)$', line)
+        if internal_match:
+            count = int(internal_match.group(1))
+            card_id = internal_match.group(2)
+
             for _ in range(count):
                 card_ids.append(card_id)
 

@@ -6,6 +6,7 @@ Supports Human vs Bot, Bot vs Bot, or any agent combination.
 
 Usage:
     python src/play_console.py
+    python src/play_console.py --p1 src/decks/my_deck.txt --p2 src/decks/opponent.txt
 
 Configuration:
     Change player_1_agent and player_2_agent to switch between:
@@ -15,6 +16,7 @@ Configuration:
 """
 
 import sys
+import argparse
 from typing import Optional
 
 from models import GameState, GamePhase
@@ -40,28 +42,9 @@ RANDOM_SEED = 10000  # Set to None for random games
 MAX_TURNS = 200   # Prevent infinite loops
 ENABLE_XRAY_LOGGING = True  # Enable X-Ray debug logging (shows all hidden info)
 
-# Deck Configuration
-DECK_1_FILE = None  # Path to deck file, or None to use default
-DECK_2_FILE = None  # Path to deck file, or None to use default
-
-
-# ============================================================================
-# DEFAULT DECKS (Simple test decks)
-# ============================================================================
-
-DEFAULT_DECK_1 = """
-10 Charmander sv3-26
-4 Charmeleon sv3-27
-2 Charizard ex sv3-125
-44 Fire Energy base1-98
-"""
-
-DEFAULT_DECK_2 = """
-10 Pikachu sv8-57
-4 Raichu sv8-58
-20 Zapdos ex sv1-128
-26 Lightning Energy base1-100
-"""
+# Default Deck Paths
+DEFAULT_DECK_1_PATH = "src/decks/dragapult_pidgeot.txt"
+DEFAULT_DECK_2_PATH = "src/decks/charizard_ex.txt"
 
 
 # ============================================================================
@@ -238,35 +221,84 @@ def _print_game_over(state: GameState, player_1_agent, player_2_agent):
 
 def main():
     """Main entry point for console game."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Pokémon TCG Engine - Console Game",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python src/play_console.py
+  python src/play_console.py --p1 src/decks/dragapult_pidgeot.txt
+  python src/play_console.py --p1 decks/my_deck.txt --p2 decks/opponent.txt
+        """
+    )
+    parser.add_argument(
+        '--p1',
+        type=str,
+        default=DEFAULT_DECK_1_PATH,
+        help=f'Path to Player 1 deck file (default: {DEFAULT_DECK_1_PATH})'
+    )
+    parser.add_argument(
+        '--p2',
+        type=str,
+        default=DEFAULT_DECK_2_PATH,
+        help=f'Path to Player 2 deck file (default: {DEFAULT_DECK_2_PATH})'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=RANDOM_SEED,
+        help=f'Random seed for deterministic games (default: {RANDOM_SEED})'
+    )
+    parser.add_argument(
+        '--max-turns',
+        type=int,
+        default=MAX_TURNS,
+        help=f'Maximum turns before draw (default: {MAX_TURNS})'
+    )
+    parser.add_argument(
+        '--no-xray',
+        action='store_true',
+        help='Disable X-Ray debug logging'
+    )
+
+    args = parser.parse_args()
+
     print("=" * 70)
     print("POKÉMON TCG ENGINE - CONSOLE MODE")
     print("=" * 70)
 
-    # Load decks
-    if DECK_1_FILE:
-        deck_1_text = load_deck_from_file(DECK_1_FILE)
-    else:
-        deck_1_text = DEFAULT_DECK_1
+    # Load decks from files
+    print(f"\n[Deck Loading]")
+    print(f"  Player 1: {args.p1}")
+    print(f"  Player 2: {args.p2}")
 
-    if DECK_2_FILE:
-        deck_2_text = load_deck_from_file(DECK_2_FILE)
-    else:
-        deck_2_text = DEFAULT_DECK_2
+    try:
+        deck_1_text = load_deck_from_file(args.p1)
+        deck_2_text = load_deck_from_file(args.p2)
+    except FileNotFoundError as e:
+        print(f"\n[ERROR] Deck file not found: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[ERROR] Failed to load deck: {e}")
+        sys.exit(1)
 
     # Setup game
     print("\n[Setup] Building game state...")
     try:
-        state = quick_setup(deck_1_text, deck_2_text, random_seed=RANDOM_SEED)
+        state = quick_setup(deck_1_text, deck_2_text, random_seed=args.seed)
     except Exception as e:
         print(f"\n[ERROR] Failed to setup game: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     # Create engine
-    engine = PokemonEngine(random_seed=RANDOM_SEED)
+    engine = PokemonEngine(random_seed=args.seed)
 
     # Initialize X-Ray logger if enabled
     xray_logger = None
-    if ENABLE_XRAY_LOGGING:
+    if ENABLE_XRAY_LOGGING and not args.no_xray:
         from utils import XRayLogger
         xray_logger = XRayLogger()
 
@@ -277,7 +309,7 @@ def main():
             PLAYER_2_AGENT,
             state,
             engine,
-            max_turns=MAX_TURNS,
+            max_turns=args.max_turns,
             verbose=True,
             xray_logger=xray_logger
         )

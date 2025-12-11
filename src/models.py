@@ -361,6 +361,7 @@ class GameState(BaseModel):
     # Turn tracking
     turn_count: int = Field(1, description="Current turn number")
     active_player_index: int = Field(0, description="Index of active player (0 or 1)")
+    starting_player_id: int = Field(0, description="Player who goes first (0 or 1)")
     current_phase: GamePhase = Field(GamePhase.SETUP, description="Current game phase")
 
     # Global state
@@ -423,6 +424,7 @@ class ActionType(str, Enum):
     """All possible action types in the game."""
     # Setup
     MULLIGAN_DRAW = "mulligan_draw"
+    REVEAL_HAND_MULLIGAN = "reveal_hand_mulligan"  # Category 5 Fix: No basics in hand
     PLACE_ACTIVE = "place_active"
     PLACE_BENCH = "place_bench"
 

@@ -18,41 +18,39 @@ from cards.registry import get_registry_stats
 # ============================================================================
 
 SAMPLE_DECK_TEXT = """
-Pokémon: 26
-2 Charmander PAF 7
-1 Charmander PFL 11
-1 Charmeleon PFL 12
-2 Charizard ex OBF 125
-3 Hoothoot SCR 114
-3 Noctowl SCR 115
-1 Pidgey MEW 16
-1 Pidgey OBF 162
-2 Pidgeot ex OBF 164
+Pokémon: 23
+4 Dreepy TWM 128
+4 Drakloak TWM 129
+3 Dragapult ex TWM 130
 2 Duskull PRE 35
-1 Dusclops PRE 36
+2 Dusclops PRE 36
 1 Dusknoir PRE 37
-2 Terapagos ex SCR 128
-2 Fan Rotom SCR 118
+2 Budew PRE 4
+1 Bloodmoon Ursaluna ex TWM 141
 1 Fezandipiti ex SFA 38
-1 Klefki SVI 96
+1 Latias ex SSP 76
+1 Munkidori TWM 95
+1 Hawlucha SVI 118
 
-Trainer: 27
-4 Dawn PFL 87
-2 Iono PAL 185
-2 Boss's Orders MEG 114
-1 Briar SCR 132
+Trainer: 30
+4 Lillie's Determination MEG 119
+4 Iono PAL 185
+3 Boss's Orders MEG 114
+2 Hilda WHT 84
+1 Professor Turo's Scenario PAR 171
 4 Buddy-Buddy Poffin TEF 144
-4 Nest Ball SVI 181
-4 Rare Candy MEG 125
-1 Ultra Ball MEG 131
-1 Super Rod PAL 188
-1 Night Stretcher SFA 61
-1 Prime Catcher TEF 157
-2 Area Zero Underdepths SCR 131
+4 Ultra Ball MEG 131
+3 Counter Catcher PAR 160
+2 Night Stretcher SFA 61
+1 Nest Ball SVI 181
+2 Jamming Tower TWM 153
 
 Energy: 7
-5 Fire Energy MEE 2
-2 Jet Energy PAL 190
+3 Luminous Energy PAL 191
+2 Psychic Energy MEE 5
+1 Fire Energy MEE 2
+1 Neo Upper Energy TEF 162
+
 """
 
 

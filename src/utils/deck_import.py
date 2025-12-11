@@ -65,6 +65,7 @@ SET_CODE_MAP: Dict[str, str] = {
     "PRE": "sv8pt5",     # Mega Evolution
     "MEE": "sve",        # Mega Evolution
     "PFL": "me2",        # Mega Evolution
+    "WHT": "rsv10pt5",   # White Flare
 
     # Add more mappings as needed
 }

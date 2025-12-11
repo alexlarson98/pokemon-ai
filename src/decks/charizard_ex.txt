@@ -1,0 +1,35 @@
+Pokémon: 26
+2 Charmander PAF 7
+1 Charmander PFL 11
+1 Charmeleon PFL 12
+2 Charizard ex OBF 125
+3 Hoothoot SCR 114
+3 Noctowl SCR 115
+1 Pidgey MEW 16
+1 Pidgey OBF 162
+2 Pidgeot ex OBF 164
+2 Duskull PRE 35
+1 Dusclops PRE 36
+1 Dusknoir PRE 37
+2 Terapagos ex SCR 128
+2 Fan Rotom SCR 118
+1 Fezandipiti ex SFA 38
+1 Klefki SVI 96
+
+Trainer: 27
+4 Dawn PFL 87
+2 Iono PAL 185
+2 Boss's Orders MEG 114
+1 Briar SCR 132
+4 Buddy-Buddy Poffin TEF 144
+4 Nest Ball SVI 181
+4 Rare Candy MEG 125
+1 Ultra Ball MEG 131
+1 Super Rod PAL 188
+1 Night Stretcher SFA 61
+1 Prime Catcher TEF 157
+2 Area Zero Underdepths SCR 131
+
+Energy: 7
+5 Fire Energy MEE 2
+2 Jet Energy PAL 190
