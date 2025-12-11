@@ -193,6 +193,10 @@ class XRayLogger:
             deck_cards = ", ".join([self._fmt(card) for card in p0.deck.cards])
             f.write(f"DECK ({len(p0.deck.cards)}): [{deck_cards}]\n")
 
+            # DISCARD (Resource usage tracking)
+            discard_cards = ", ".join([self._fmt(card) for card in p0.discard.cards])
+            f.write(f"DISCARD ({len(p0.discard.cards)}): [{discard_cards}]\n")
+
             # === PLAYER 1 ===
             f.write(f"\n[PLAYER 1]\n")
 
@@ -219,6 +223,10 @@ class XRayLogger:
             # DECK (ALL cards in order)
             deck_cards = ", ".join([self._fmt(card) for card in p1.deck.cards])
             f.write(f"DECK ({len(p1.deck.cards)}): [{deck_cards}]\n")
+
+            # DISCARD (Resource usage tracking)
+            discard_cards = ", ".join([self._fmt(card) for card in p1.discard.cards])
+            f.write(f"DISCARD ({len(p1.discard.cards)}): [{discard_cards}]\n")
 
             # === GLOBAL ===
             f.write("\n[GLOBAL]\n")
