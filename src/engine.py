@@ -1660,7 +1660,7 @@ class PokemonEngine:
         if not card_def:
             return 0
 
-        base_cost = len(card_def.retreat_cost) if hasattr(card_def, 'retreat_cost') and card_def.retreat_cost else 0
+        base_cost = card_def.base_retreat_cost if hasattr(card_def, 'base_retreat_cost') else 0
 
         # Apply retreat cost modifiers from active effects
         modifier = 0
