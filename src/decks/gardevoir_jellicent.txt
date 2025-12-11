@@ -1,0 +1,33 @@
+Pokémon: 18
+3 Munkidori TWM 95
+2 Ralts MEG 58
+1 Kirlia MEG 59
+2 Gardevoir ex SVI 86
+2 Frillish WHT 44
+2 Jellicent ex WHT 45
+1 Mega Diancie ex PFL 41
+1 Latias ex SSP 76
+1 Fezandipiti ex SFA 38
+1 Lillie's Clefairy ex JTG 56
+1 Mew ex MEW 151
+1 Scream Tail PAR 86
+
+Trainer: 32
+4 Iono PAL 185
+4 Lillie's Determination MEG 119
+1 Professor Turo's Scenario PAR 171
+4 Ultra Ball MEG 131
+3 Rare Candy MEG 125
+3 Earthen Vessel PAR 163
+2 Nest Ball SVI 181
+2 Counter Catcher PAR 160
+2 Night Stretcher SFA 61
+1 Super Rod PAL 188
+1 Secret Box TWM 163
+2 Bravery Charm PAL 173
+2 Artazon PAL 171
+1 Mystery Garden MEG 122
+
+Energy: 10
+7 Psychic Energy MEE 5
+3 Darkness Energy MEE 7
