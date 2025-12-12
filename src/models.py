@@ -40,7 +40,7 @@ class Subtype(str, Enum):
     ITEM = "Item"
     SUPPORTER = "Supporter"
     STADIUM = "Stadium"
-    TOOL = "Tool"
+    TOOL = "Pokemon Tool"
     ACE_SPEC = "ACE SPEC"
 
 

@@ -544,13 +544,15 @@ class PokemonEngine:
                 seen_tools.add(card_name)
                 targets = player.board.get_all_pokemon()
                 for target in targets:
-                    # TODO: Check if target already has a Tool
-                    actions.append(Action(
-                        action_type=ActionType.ATTACH_TOOL,
-                        player_id=player.player_id,
-                        card_id=card.id,
-                        target_id=target.id
-                    ))
+                    # Check if target has room for a tool (standard rule: max 1 tool)
+                    max_tools = self.get_max_tool_capacity(target)
+                    if len(target.attached_tools) < max_tools:
+                        actions.append(Action(
+                            action_type=ActionType.ATTACH_TOOL,
+                            player_id=player.player_id,
+                            card_id=card.id,
+                            target_id=target.id
+                        ))
 
         return actions
 
@@ -761,6 +763,8 @@ class PokemonEngine:
             return self._apply_play_supporter(state, action)
         elif action.action_type == ActionType.PLAY_STADIUM:
             return self._apply_play_stadium(state, action)
+        elif action.action_type == ActionType.ATTACH_TOOL:
+            return self._apply_attach_tool(state, action)
         elif action.action_type == ActionType.RETREAT:
             return self._apply_retreat(state, action)
         elif action.action_type == ActionType.ATTACK:
@@ -962,6 +966,44 @@ class PokemonEngine:
 
             state.stadium = card
             player.stadium_played_this_turn = True
+
+        return state
+
+    def _apply_attach_tool(self, state: GameState, action: Action) -> GameState:
+        """
+        Attach a Pokemon Tool card to a Pokemon.
+
+        Args:
+            state: Current game state
+            action: Action containing card_id (Tool) and target_id (Pokemon)
+
+        Returns:
+            Updated game state
+        """
+        player = state.get_player(action.player_id)
+
+        # Remove tool from hand
+        tool_card = player.hand.remove_card(action.card_id)
+        if not tool_card:
+            return state  # Card not in hand
+
+        # Find target Pokemon
+        target_pokemon = None
+        if player.board.active_spot and player.board.active_spot.id == action.target_id:
+            target_pokemon = player.board.active_spot
+        else:
+            for bench_pokemon in player.board.bench:
+                if bench_pokemon.id == action.target_id:
+                    target_pokemon = bench_pokemon
+                    break
+
+        if not target_pokemon:
+            # Target not found - put card back in hand
+            player.hand.add_card(tool_card)
+            return state
+
+        # Attach tool to target
+        target_pokemon.attached_tools.append(tool_card)
 
         return state
 
@@ -1681,6 +1723,23 @@ class PokemonEngine:
         # Final cost (minimum 0)
         final_cost = max(0, base_cost + modifier)
         return final_cost
+
+    def get_max_tool_capacity(self, pokemon: CardInstance) -> int:
+        """
+        Get the maximum number of Tools this Pokemon can have attached.
+
+        Standard rule: 1 Tool per Pokemon.
+        Future-proofing: Some abilities may allow 2+ Tools (e.g., "Tool Box" ability).
+
+        Args:
+            pokemon: Pokemon to check
+
+        Returns:
+            Maximum number of Tools allowed (default: 1)
+        """
+        # Standard rule: Max 1 tool
+        # TODO: Check for abilities that increase tool capacity (e.g., "Tool Box")
+        return 1
 
     def _get_card_subtypes(self, card: CardInstance) -> Set[Subtype]:
         """Get subtypes for a card from the card registry."""

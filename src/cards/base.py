@@ -993,20 +993,28 @@ class DataDrivenTrainer(TrainerCard):
         Args:
             json_data: Card data from JSON file
         """
+        # Helper function to normalize text (convert "Pokémon" to "Pokemon")
+        def normalize_text(text: str) -> str:
+            """Normalize Unicode characters to ASCII for consistent matching."""
+            return text.replace("Pokémon", "Pokemon").replace("é", "e").strip()
+
         # Parse subtypes
         subtypes = []
         for subtype_str in json_data.get('subtypes', []):
+            # Normalize the subtype string
+            normalized_subtype = normalize_text(subtype_str)
+
             try:
-                subtypes.append(Subtype(subtype_str))
+                subtypes.append(Subtype(normalized_subtype))
             except ValueError:
-                # Handle unmapped subtypes
-                if subtype_str == "Item":
+                # Handle unmapped subtypes (fallback if normalization doesn't match enum)
+                if normalized_subtype == "Item":
                     subtypes.append(Subtype.ITEM)
-                elif subtype_str == "Supporter":
+                elif normalized_subtype == "Supporter":
                     subtypes.append(Subtype.SUPPORTER)
-                elif subtype_str == "Stadium":
+                elif normalized_subtype == "Stadium":
                     subtypes.append(Subtype.STADIUM)
-                elif subtype_str == "Tool":
+                elif normalized_subtype == "Pokemon Tool":
                     subtypes.append(Subtype.TOOL)
 
         # Get card text
