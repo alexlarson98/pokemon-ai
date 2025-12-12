@@ -38,12 +38,14 @@ PLAYER_2_AGENT = RandomBot(name="Bob the Bot")
 # PLAYER_2_AGENT = HumanAgent(name="Bob")
 
 # Game Configuration
-RANDOM_SEED = 10000  # Set to None for random games
+RANDOM_SEED = None  # Set to None for random games
 MAX_TURNS = 200   # Prevent infinite loops
 ENABLE_XRAY_LOGGING = True  # Enable X-Ray debug logging (shows all hidden info)
 
 # Default Deck Paths
-DEFAULT_DECK_1_PATH = "src/decks/dragapult_pidgeot.txt"
+DEFAULT_DECK_1_PATH = "src/decks/gholdengo.txt"
+# DEFAULT_DECK_1_PATH = "src/decks/gardevoir_jellicent.txt"
+# DEFAULT_DECK_1_PATH = "src/decks/dragapult_pidgeot.txt"
 DEFAULT_DECK_2_PATH = "src/decks/charizard_ex.txt"
 
 

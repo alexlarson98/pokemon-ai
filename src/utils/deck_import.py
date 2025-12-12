@@ -67,6 +67,7 @@ SET_CODE_MAP: Dict[str, str] = {
     "PFL": "me2",        # Mega Evolution
     "WHT": "rsv10pt5",   # White Flare
     "JTG": "sv9",        # Journey Together
+    "BLK": "zsv10pt5",   # Black Bolt
 
     # Add more mappings as needed
 }

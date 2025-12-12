@@ -18,39 +18,36 @@ from cards.registry import get_registry_stats
 # ============================================================================
 
 SAMPLE_DECK_TEXT = """
-Pokémon: 23
-4 Dreepy TWM 128
-4 Drakloak TWM 129
-3 Dragapult ex TWM 130
-2 Duskull PRE 35
-2 Dusclops PRE 36
-1 Dusknoir PRE 37
-2 Budew PRE 4
-1 Bloodmoon Ursaluna ex TWM 141
+Pokémon: 15
+4 Gimmighoul SSP 97
+4 Gholdengo ex PAR 139
+2 Solrock MEG 75
+2 Lunatone MEG 74
+1 Genesect ex BLK 67
 1 Fezandipiti ex SFA 38
-1 Latias ex SSP 76
 1 Munkidori TWM 95
-1 Hawlucha SVI 118
 
-Trainer: 30
-4 Lillie's Determination MEG 119
-4 Iono PAL 185
+Trainer: 34
+4 Arven OBF 186
 3 Boss's Orders MEG 114
-2 Hilda WHT 84
-1 Professor Turo's Scenario PAR 171
-4 Buddy-Buddy Poffin TEF 144
-4 Ultra Ball MEG 131
-3 Counter Catcher PAR 160
-2 Night Stretcher SFA 61
-1 Nest Ball SVI 181
-2 Jamming Tower TWM 153
+2 Professor Turo's Scenario PAR 171
+1 Lana's Aid TWM 155
+4 Superior Energy Retrieval PAL 189
+4 Nest Ball SVI 181
+4 Fighting Gong MEG 116
+3 Earthen Vessel PAR 163
+1 Super Rod PAL 188
+1 Buddy-Buddy Poffin TEF 144
+1 Premium Power Pro MEG 124
+1 Prime Catcher TEF 157
+2 Air Balloon BLK 79
+1 Vitality Band SVI 197
+2 Artazon PAL 171
 
-Energy: 7
-3 Luminous Energy PAL 191
-2 Psychic Energy MEE 5
-1 Fire Energy MEE 2
-1 Neo Upper Energy TEF 162
-
+Energy: 11
+7 Fighting Energy MEE 6
+3 Metal Energy MEE 8
+1 Darkness Energy MEE 7
 """
 
 
