@@ -14,6 +14,11 @@ from .trainers import (
     ultra_ball_effect,
     nest_ball_effect,
     iono_effect,
+    buddy_buddy_poffin_actions,
+    rare_candy_actions,
+    ultra_ball_actions,
+    nest_ball_actions,
+    iono_actions,
 )
 
 __all__ = [
@@ -22,4 +27,9 @@ __all__ = [
     'ultra_ball_effect',
     'nest_ball_effect',
     'iono_effect',
+    'buddy_buddy_poffin_actions',
+    'rare_candy_actions',
+    'ultra_ball_actions',
+    'nest_ball_actions',
+    'iono_actions',
 ]

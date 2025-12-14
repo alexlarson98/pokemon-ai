@@ -273,18 +273,22 @@ class PokemonEngine:
         ability_actions = self._get_ability_actions(state)
         actions.extend(ability_actions)
 
-        # ACTION 6: Retreat (Constitution Section 2, Phase 2)
+        # ACTION 6: Use Stadium Effects
+        stadium_actions = self._get_stadium_actions(state)
+        actions.extend(stadium_actions)
+
+        # ACTION 7: Retreat (Constitution Section 2, Phase 2)
         if not player.retreated_this_turn and player.has_active_pokemon():
             retreat_actions = self._get_retreat_actions(state)
             actions.extend(retreat_actions)
 
-        # ACTION 7: Attack Actions (squashed from ATTACK phase)
+        # ACTION 8: Attack Actions (squashed from ATTACK phase)
         if player.has_active_pokemon():
             active = player.board.active_spot
             attack_actions = self._get_attack_actions(state, active)
             actions.extend(attack_actions)
 
-        # ACTION 8: Pass Turn (end turn without attacking)
+        # ACTION 9: Pass Turn (end turn without attacking)
         actions.append(Action(
             action_type=ActionType.END_TURN,
             player_id=player.player_id,
@@ -516,11 +520,20 @@ class PokemonEngine:
                 # Architecture Fix: Check global permissions (e.g., Item Lock)
                 if self.check_global_permission(state, 'play_item', player.player_id):
                     seen_items.add(card_name)
-                    actions.append(Action(
-                        action_type=ActionType.PLAY_ITEM,
-                        player_id=player.player_id,
-                        card_id=card.id
-                    ))
+
+                    # Check if card has a custom action generator
+                    generator = logic_registry.get_card_logic(card.card_id, 'generator')
+                    if generator:
+                        # Use generator to create specific actions
+                        generated_actions = generator(state, card, player)
+                        actions.extend(generated_actions)
+                    else:
+                        # Fall back to generic action
+                        actions.append(Action(
+                            action_type=ActionType.PLAY_ITEM,
+                            player_id=player.player_id,
+                            card_id=card.id
+                        ))
 
             # SUPPORTER: Once per turn, not on Turn 1 going first (deduplicate by name)
             if Subtype.SUPPORTER in subtypes and card_name not in seen_supporters:
@@ -530,11 +543,20 @@ class PokemonEngine:
                         # Architecture Fix: Check global permissions (e.g., Supporter Lock)
                         if self.check_global_permission(state, 'play_supporter', player.player_id):
                             seen_supporters.add(card_name)
-                            actions.append(Action(
-                                action_type=ActionType.PLAY_SUPPORTER,
-                                player_id=player.player_id,
-                                card_id=card.id
-                            ))
+
+                            # Check if card has a custom action generator
+                            generator = logic_registry.get_card_logic(card.card_id, 'generator')
+                            if generator:
+                                # Use generator to create specific actions
+                                generated_actions = generator(state, card, player)
+                                actions.extend(generated_actions)
+                            else:
+                                # Fall back to generic action
+                                actions.append(Action(
+                                    action_type=ActionType.PLAY_SUPPORTER,
+                                    player_id=player.player_id,
+                                    card_id=card.id
+                                ))
 
             # STADIUM: Once per turn, must have different name (deduplicate by name)
             if Subtype.STADIUM in subtypes and card_name not in seen_stadiums:
@@ -591,8 +613,11 @@ class PokemonEngine:
         Generate ability activation actions.
 
         Checks global permission for ability usage (Klefki blocks abilities).
-        Uses logic_registry to validate card logic exists.
+        Uses logic_registry to check for custom action generators.
         """
+        from cards.registry import create_card
+        from cards import logic_registry
+
         player = state.get_active_player()
         actions = []
 
@@ -610,11 +635,74 @@ class PokemonEngine:
             if not can_use_ability:
                 continue  # Abilities blocked (e.g., by Klefki)
 
-            # TODO: Query card definition for abilities
-            # For now, return empty (abilities implemented in cards/)
-            # When implemented, create USE_ABILITY actions here
-            # Validate using: logic_registry.get_card_logic(pokemon.card_id, ability_name)
-            pass
+            # Get card definition to check for abilities
+            card_def = create_card(pokemon.card_id)
+            if not card_def or not hasattr(card_def, 'abilities'):
+                continue
+
+            # Check each ability on the card
+            for ability in card_def.abilities:
+                # Check if card has a custom action generator
+                card_logic = logic_registry.get_card_logic(pokemon.card_id, ability.name)
+
+                if isinstance(card_logic, dict) and 'generator' in card_logic:
+                    # Use custom generator to create specific actions
+                    generator = card_logic['generator']
+                    generated_actions = generator(state, pokemon, player)
+                    actions.extend(generated_actions)
+                else:
+                    # Fall back to default logic
+                    # Check 'Once Per Turn' restriction
+                    if hasattr(ability, 'once_per_turn') and ability.once_per_turn:
+                        # Check if already used this turn
+                        if ability.name in pokemon.abilities_used_this_turn:
+                            continue
+
+                    # Create generic USE_ABILITY action
+                    actions.append(Action(
+                        action_type=ActionType.USE_ABILITY,
+                        player_id=player.player_id,
+                        card_id=pokemon.id,
+                        metadata={"ability_name": ability.name}
+                    ))
+
+        return actions
+
+    def _get_stadium_actions(self, state: GameState) -> List[Action]:
+        """
+        Generate stadium activation actions.
+
+        Checks if there's an active stadium with a 'once per turn' effect
+        that can be activated (e.g., Artazon, PokéStop).
+
+        Uses logic_registry to check for custom action generators.
+        Most stadiums (like Temple of Sinnoh) are passive and have no actions.
+        """
+        from cards import logic_registry
+
+        actions = []
+
+        # Check if there's an active stadium
+        if not state.stadium:
+            return actions
+
+        stadium = state.stadium
+        player = state.get_active_player()
+
+        # Check if stadium has a custom action generator
+        # Treat stadium effect like a nameless ability - look up by card ID
+        card_logic = logic_registry.get_card_logic(stadium.card_id, 'generator')
+
+        if isinstance(card_logic, dict) and 'generator' in card_logic:
+            # Stadium has nested structure (for abilities/effects)
+            generator = card_logic['generator']
+            generated_actions = generator(state, stadium, player)
+            actions.extend(generated_actions)
+        elif callable(card_logic):
+            # Stadium has direct generator function
+            generated_actions = card_logic(state, stadium, player)
+            actions.extend(generated_actions)
+        # else: No generator - stadium is passive (no actions)
 
         return actions
 
@@ -683,7 +771,11 @@ class PokemonEngine:
         - Must have sufficient Energy to pay cost
         - Check for attack effects (e.g., "cannot attack next turn")
         - Check status conditions (Asleep, Paralyzed)
+        - Uses logic_registry to check for custom action generators
         """
+        from cards.registry import create_card
+        from cards import logic_registry
+
         player = state.get_active_player()
         actions = []
 
@@ -702,7 +794,6 @@ class PokemonEngine:
             return actions  # Paralyzed Pokémon cannot attack
 
         # Get card definition to check attacks and energy costs
-        from cards.registry import create_card
         card_def = create_card(active.card_id)
 
         if not card_def or not hasattr(card_def, 'attacks'):
@@ -710,28 +801,38 @@ class PokemonEngine:
 
         # Check each attack for energy requirements
         for attack in card_def.attacks:
-            # Calculate total energy provided by attached cards
-            # Architecture Fix: Supports special energy cards (e.g., Double Turbo = 2 Colorless)
-            provided_energy = self._calculate_provided_energy(active)
+            # Check if card has a custom action generator for this attack
+            card_logic = logic_registry.get_card_logic(active.card_id, attack.name)
 
-            # Get total energy count (sum all types)
-            total_energy_count = sum(provided_energy.values())
+            if isinstance(card_logic, dict) and 'generator' in card_logic:
+                # Use custom generator to create specific actions
+                generator = card_logic['generator']
+                generated_actions = generator(state, active, player)
+                actions.extend(generated_actions)
+            else:
+                # Fall back to default logic
+                # Calculate total energy provided by attached cards
+                # Architecture Fix: Supports special energy cards (e.g., Double Turbo = 2 Colorless)
+                provided_energy = self._calculate_provided_energy(active)
 
-            # Calculate attack cost with reductions (e.g., Radiant Charizard)
-            # Architecture Fix: Supports cost reduction effects
-            final_cost = self.calculate_attack_cost(state, active, attack)
+                # Get total energy count (sum all types)
+                total_energy_count = sum(provided_energy.values())
 
-            # RULE: Must have enough energy attached
-            # Note: This is simplified - proper implementation would check specific energy types
-            # For now, we just check total count (colorless energy rule)
-            if total_energy_count >= final_cost:
-                actions.append(Action(
-                    action_type=ActionType.ATTACK,
-                    player_id=player.player_id,
-                    card_id=active.id,
-                    attack_name=attack.name,
-                    metadata={"target": "opponent_active", "energy_cost": final_cost}
-                ))
+                # Calculate attack cost with reductions (e.g., Radiant Charizard)
+                # Architecture Fix: Supports cost reduction effects
+                final_cost = self.calculate_attack_cost(state, active, attack)
+
+                # RULE: Must have enough energy attached
+                # Note: This is simplified - proper implementation would check specific energy types
+                # For now, we just check total count (colorless energy rule)
+                if total_energy_count >= final_cost:
+                    actions.append(Action(
+                        action_type=ActionType.ATTACK,
+                        player_id=player.player_id,
+                        card_id=active.id,
+                        attack_name=attack.name,
+                        metadata={"target": "opponent_active", "energy_cost": final_cost}
+                    ))
 
         return actions
 
