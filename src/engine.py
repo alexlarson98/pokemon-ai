@@ -380,12 +380,28 @@ class PokemonEngine:
 
         # Generate one action per unique energy type per target
         for energy in unique_energy_cards:
+            energy_def = create_card(energy.card_id)
+            energy_name = energy_def.name if energy_def and hasattr(energy_def, 'name') else energy.card_id
+
             for target in targets:
+                # Get target definition for name
+                target_def = create_card(target.card_id)
+                target_name = target_def.name if target_def and hasattr(target_def, 'name') else target.card_id
+
+                # Determine location label
+                if target == player.board.active_spot:
+                    location_label = "Active"
+                else:
+                    # Find bench index
+                    bench_index = next((idx for idx, p in enumerate(player.board.bench) if p and p.id == target.id), -1)
+                    location_label = f"Bench {bench_index + 1}"
+
                 actions.append(Action(
                     action_type=ActionType.ATTACH_ENERGY,
                     player_id=player.player_id,
                     card_id=energy.id,
-                    target_id=target.id
+                    target_id=target.id,
+                    display_label=f"Attach {energy_name} to {target_name} ({location_label})"
                 ))
 
         return actions
@@ -547,11 +563,25 @@ class PokemonEngine:
                     # Check if target has room for a tool (standard rule: max 1 tool)
                     max_tools = self.get_max_tool_capacity(target)
                     if len(target.attached_tools) < max_tools:
+                        # Get target definition for name
+                        target_def = create_card(target.card_id)
+                        target_name = target_def.name if target_def and hasattr(target_def, 'name') else target.card_id
+
+                        # Determine location label
+                        if target == player.board.active_spot:
+                            location_label = "Active"
+                        else:
+                            # Find bench index
+                            bench_index = next((idx for idx, p in enumerate(player.board.bench) if p and p.id == target.id), -1)
+                            location_label = f"Bench {bench_index + 1}"
+
+                        # Create action with display label
                         actions.append(Action(
                             action_type=ActionType.ATTACH_TOOL,
                             player_id=player.player_id,
                             card_id=card.id,
-                            target_id=target.id
+                            target_id=target.id,
+                            display_label=f"Attach {card_name} to {target_name} ({location_label})"
                         ))
 
         return actions
@@ -899,7 +929,7 @@ class PokemonEngine:
         """
         Play Item card.
 
-        Category 3 Fix: Execute item effect before discarding.
+        Spark of Life: Uses new standard signature (state, card, action).
         """
         player = state.get_player(action.player_id)
         card = player.hand.remove_card(action.card_id)
@@ -908,13 +938,8 @@ class PokemonEngine:
             # Execute item effect (delegate to card logic)
             item_logic = logic_registry.get_card_logic(card.card_id, 'effect')
             if item_logic:
-                try:
-                    # Execute the item effect
-                    # target from metadata if provided (e.g., target Pokémon)
-                    target = action.metadata.get('target') if action.metadata else None
-                    state = item_logic(state, card, target=target)
-                except Exception as e:
-                    print(f"[WARNING] Item effect failed for {card.card_id}: {e}")
+                # New standard signature: (state, card, action)
+                state = item_logic(state, card, action)
             else:
                 print(f"[WARNING] No effect logic found for Item: {card.card_id}")
 
@@ -927,7 +952,7 @@ class PokemonEngine:
         """
         Play Supporter card.
 
-        Category 3 Fix: Execute supporter effect before discarding.
+        Spark of Life: Uses new standard signature (state, card, action).
         """
         player = state.get_player(action.player_id)
         card = player.hand.remove_card(action.card_id)
@@ -938,13 +963,8 @@ class PokemonEngine:
             # Execute supporter effect (delegate to card logic)
             supporter_logic = logic_registry.get_card_logic(card.card_id, 'effect')
             if supporter_logic:
-                try:
-                    # Execute the supporter effect
-                    # target from metadata if provided
-                    target = action.metadata.get('target') if action.metadata else None
-                    state = supporter_logic(state, card, target=target)
-                except Exception as e:
-                    print(f"[WARNING] Supporter effect failed for {card.card_id}: {e}")
+                # New standard signature: (state, card, action)
+                state = supporter_logic(state, card, action)
             else:
                 print(f"[WARNING] No effect logic found for Supporter: {card.card_id}")
 

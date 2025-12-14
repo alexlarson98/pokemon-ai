@@ -469,8 +469,17 @@ class Action(BaseModel):
     choice_index: Optional[int] = None
     metadata: Dict = Field(default_factory=dict, description="Action-specific data")
 
+    # 'Spark of Life' additions
+    parameters: Dict = Field(default_factory=dict, description="Variable inputs (discard_ids, search_targets, etc.)")
+    display_label: Optional[str] = Field(None, description="UI/Logging label (e.g., 'Attach Air Balloon to Active')")
+
     def __str__(self) -> str:
         """Human-readable action description."""
+        # Use display_label if available
+        if self.display_label:
+            return self.display_label
+
+        # Fallback to default format
         parts = [f"{self.action_type.value}"]
         if self.card_id:
             parts.append(f"card={self.card_id}")
