@@ -803,12 +803,11 @@ class PokemonEngine:
         for attack in card_def.attacks:
             # Calculate energy cost for this attack
             provided_energy = self._calculate_provided_energy(active)
-            total_energy_count = sum(provided_energy.values())
             final_cost = self.calculate_attack_cost(state, active, attack)
 
-            # RULE: Must have enough energy attached to use any attack
-            if total_energy_count < final_cost:
-                continue  # Skip this attack if energy cost not met
+            # RULE: Must have enough energy attached AND correct types
+            if not self._can_pay_energy_cost(provided_energy, attack.cost, final_cost):
+                continue  # Skip this attack if energy requirements not met
 
             # Check if card has a custom action generator for this attack
             card_logic = logic_registry.get_card_logic(active.card_id, attack.name)
@@ -1951,14 +1950,80 @@ class PokemonEngine:
                 if energy_type:
                     # Handle both single type and list of types
                     if isinstance(energy_type, list):
-                        # Multi-type energy (e.g., Rainbow Energy)
-                        # For now, count as Colorless
-                        energy_totals['C'] = energy_totals.get('C', 0) + 1
+                        if len(energy_type) == 1:
+                            # Basic energy (single type in a list)
+                            # Extract the EnergyType and get its string value
+                            single_type = energy_type[0]
+                            type_key = single_type.value if hasattr(single_type, 'value') else str(single_type)
+                            energy_totals[type_key] = energy_totals.get(type_key, 0) + 1
+                        else:
+                            # Multi-type energy (e.g., Rainbow Energy)
+                            # For now, count as Colorless
+                            energy_totals['C'] = energy_totals.get('C', 0) + 1
                     else:
-                        # Single type energy
-                        energy_totals[energy_type] = energy_totals.get(energy_type, 0) + 1
+                        # Single type energy (not in a list)
+                        type_key = energy_type.value if hasattr(energy_type, 'value') else str(energy_type)
+                        energy_totals[type_key] = energy_totals.get(type_key, 0) + 1
 
         return energy_totals
+
+    def _can_pay_energy_cost(self, provided_energy: Dict[str, int], required_energy: List, total_cost: int) -> bool:
+        """
+        Check if the provided energy can pay for the attack cost.
+
+        Implements the Pokémon TCG energy payment rules:
+        - Specific energy types (e.g., Water, Fire) can only be paid with that type or Colorless
+        - Colorless energy requirements can be paid with any energy type
+        - After paying specific requirements, any remaining Colorless can be paid with leftover energy
+
+        Args:
+            provided_energy: Dict mapping energy type to count (e.g., {'Water': 2, 'Fire': 1})
+            required_energy: List of required energy types from attack.cost
+            total_cost: Total number of energy required (after reductions)
+
+        Returns:
+            True if cost can be paid, False otherwise
+
+        Example:
+            >>> # Attack requires [Water, Water, Colorless]
+            >>> provided = {'Water': 2, 'Fire': 1}
+            >>> required = [EnergyType.WATER, EnergyType.WATER, EnergyType.COLORLESS]
+            >>> _can_pay_energy_cost(provided, required, 3)  # True - 2 Water + 1 Fire for Colorless
+        """
+        from models import EnergyType
+
+        # Make a copy to track remaining energy as we "spend" it
+        remaining = provided_energy.copy()
+
+        # First, pay for specific (non-Colorless) energy requirements
+        for energy_type in required_energy:
+            if energy_type == EnergyType.COLORLESS:
+                continue  # Handle Colorless last
+
+            # Convert EnergyType to string key used in dictionary
+            type_key = energy_type.value if hasattr(energy_type, 'value') else str(energy_type)
+
+            # Check if we have this specific type
+            if remaining.get(type_key, 0) > 0:
+                remaining[type_key] -= 1
+            else:
+                # Can't pay for this specific energy requirement
+                return False
+
+        # Count how many Colorless requirements we have
+        colorless_needed = sum(1 for e in required_energy if e == EnergyType.COLORLESS)
+
+        # Check if we have enough total remaining energy for Colorless
+        total_remaining = sum(remaining.values())
+        if total_remaining < colorless_needed:
+            return False
+
+        # Also verify total energy count meets the final cost (after reductions)
+        total_provided = sum(provided_energy.values())
+        if total_provided < total_cost:
+            return False
+
+        return True
 
     def check_global_permission(self, state: GameState, action_type: str, player_id: int) -> bool:
         """

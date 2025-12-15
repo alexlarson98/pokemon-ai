@@ -1,9 +1,35 @@
-Pokémon: 4
-4 Chien-Pao ex PAL 61
+Pokémon: 21
+2 Hoothoot SCR 114
+1 Hoothoot TEF 126
+1 Hoothoot PRE 77
+3 Noctowl SCR 115
+2 Chien-Pao ex PAL 61
+2 Fan Rotom SCR 118
+2 Terapagos ex SCR 128
+2 Wellspring Mask Ogerpon ex TWM 64
+1 Ditto MEW 132
+1 Latias ex SSP 76
+1 Mew ex MEW 151
+1 Bloodmoon Ursaluna ex TWM 141
+1 Volcanion ex JTG 31
+1 Fezandipiti ex SFA 38
 
+Trainer: 32
+2 Professor's Research JTG 155
+2 Boss's Orders PAL 172
+1 Judge DRI 167
+1 N's Plan BLK 83
+1 Briar SCR 132
+1 Professor Turo's Scenario PAR 171
+4 Ultra Ball SVI 196
+4 Nest Ball SVI 181
+4 Glass Trumpet SCR 135
+4 Energy Switch SVI 173
+2 Night Stretcher SFA 61
+1 Earthen Vessel PAR 163
+1 Prime Catcher TEF 157
+1 Pal Pad SVI 182
+3 Area Zero Underdepths SCR 131
 
-Trainer: 4
-4 Professor's Research JTG 155
-
-Energy: 52
-52 Water Energy SVE 3
+Energy: 7
+7 Water Energy SVE 3

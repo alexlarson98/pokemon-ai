@@ -18,36 +18,41 @@ from cards.registry import get_registry_stats
 # ============================================================================
 
 SAMPLE_DECK_TEXT = """
-Pokémon: 15
-4 Gimmighoul SSP 97
-4 Gholdengo ex PAR 139
-2 Solrock MEG 75
-2 Lunatone MEG 74
-1 Genesect ex BLK 67
+Pokémon: 21
+2 Hoothoot SCR 114
+1 Hoothoot TEF 126
+1 Hoothoot PRE 77
+3 Noctowl SCR 115
+2 Chien-Pao ex PAL 61
+2 Fan Rotom SCR 118
+2 Terapagos ex SCR 128
+2 Wellspring Mask Ogerpon ex TWM 64
+1 Ditto MEW 132
+1 Latias ex SSP 76
+1 Mew ex MEW 151
+1 Bloodmoon Ursaluna ex TWM 141
+1 Volcanion ex JTG 31
 1 Fezandipiti ex SFA 38
-1 Munkidori TWM 95
 
-Trainer: 34
-4 Arven OBF 186
-3 Boss's Orders MEG 114
-2 Professor Turo's Scenario PAR 171
-1 Lana's Aid TWM 155
-4 Superior Energy Retrieval PAL 189
+Trainer: 32
+2 Professor's Research JTG 155
+2 Boss's Orders PAL 172
+1 Judge DRI 167
+1 N's Plan BLK 83
+1 Briar SCR 132
+1 Professor Turo's Scenario PAR 171
+4 Ultra Ball SVI 196
 4 Nest Ball SVI 181
-4 Fighting Gong MEG 116
-3 Earthen Vessel PAR 163
-1 Super Rod PAL 188
-1 Buddy-Buddy Poffin TEF 144
-1 Premium Power Pro MEG 124
+4 Glass Trumpet SCR 135
+4 Energy Switch SVI 173
+2 Night Stretcher SFA 61
+1 Earthen Vessel PAR 163
 1 Prime Catcher TEF 157
-2 Air Balloon BLK 79
-1 Vitality Band SVI 197
-2 Artazon PAL 171
+1 Pal Pad SVI 182
+3 Area Zero Underdepths SCR 131
 
-Energy: 11
-7 Fighting Energy MEE 6
-3 Metal Energy MEE 8
-1 Darkness Energy MEE 7
+Energy: 7
+7 Water Energy SVE 3
 """
 
 
