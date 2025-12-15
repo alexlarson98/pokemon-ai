@@ -23,7 +23,7 @@ Pokémon: 21
 1 Hoothoot TEF 126
 1 Hoothoot PRE 77
 3 Noctowl SCR 115
-2 Chien-Pao ex PAL 61
+2 Chien-Pao ex SVP 30
 2 Fan Rotom SCR 118
 2 Terapagos ex SCR 128
 2 Wellspring Mask Ogerpon ex TWM 64
