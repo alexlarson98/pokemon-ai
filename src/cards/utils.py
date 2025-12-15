@@ -295,3 +295,98 @@ def generate_search_actions(
                 ))
 
     return actions
+
+
+def generate_evolution_actions(
+    state: GameState,
+    player: PlayerState,
+    card: CardInstance,
+    target_subtype: 'Subtype',
+    evolution_subtype: 'Subtype',
+    label_template: str,
+    skip_stage: bool = False
+) -> List[Action]:
+    """
+    Generate atomic evolution actions for evolution items (e.g., Rare Candy).
+
+    This utility encapsulates the common pattern of:
+    1. Finding valid Pokemon on the board that can evolve
+    2. Finding evolution cards in hand
+    3. Generating Action objects for each valid pair
+
+    Args:
+        state: Current game state
+        player: Player performing the evolution
+        card: The item card being played (e.g., Rare Candy)
+        target_subtype: Subtype of Pokemon to evolve (e.g., Subtype.BASIC)
+        evolution_subtype: Subtype of evolution card (e.g., Subtype.STAGE_2)
+        label_template: Template for display_label. Use {target} and {evolution}.
+        skip_stage: If True, allows skipping evolution stages (Rare Candy)
+
+    Returns:
+        List of Actions representing all valid evolution pairs
+
+    Example:
+        >>> # Rare Candy: Evolve Basic -> Stage 2
+        >>> actions = generate_evolution_actions(
+        >>>     state, player, rare_candy,
+        >>>     target_subtype=Subtype.BASIC,
+        >>>     evolution_subtype=Subtype.STAGE_2,
+        >>>     label_template="Rare Candy: Evolve {target} into {evolution}",
+        >>>     skip_stage=True
+        >>> )
+    """
+    from models import Subtype
+    from cards.base import PokemonCard
+
+    actions = []
+
+    # Get all Pokemon on board (active + bench)
+    board_pokemon = player.board.get_all_pokemon()
+
+    # Get all evolution cards of the specified subtype from hand
+    evolution_cards = []
+    for hand_card in player.hand.cards:
+        if hand_card.id == card.id:
+            continue  # Skip the item card itself
+        card_def = get_card_definition(hand_card)
+        if (isinstance(card_def, PokemonCard) and
+            hasattr(card_def, 'subtypes') and evolution_subtype in card_def.subtypes):
+            evolution_cards.append((hand_card, card_def))
+
+    # Find valid (target, evolution) pairs
+    for target_pokemon in board_pokemon:
+        # Check evolution sickness (must have been in play for at least 1 turn)
+        if target_pokemon.turns_in_play == 0:
+            continue
+
+        target_def = get_card_definition(target_pokemon)
+
+        # Check if target is the correct subtype
+        if not (isinstance(target_def, PokemonCard) and
+                hasattr(target_def, 'subtypes') and target_subtype in target_def.subtypes):
+            continue
+
+        # Find evolution cards that can evolve from this target
+        for evolution_card, evolution_def in evolution_cards:
+            # For now, create action for all evolution cards
+            # (Engine will validate evolution chain)
+            # TODO: Proper evolution chain validation
+            if hasattr(evolution_def, 'evolves_from'):
+                label = label_template.format(
+                    target=target_def.name,
+                    evolution=evolution_def.name
+                )
+
+                actions.append(Action(
+                    action_type=ActionType.PLAY_ITEM,
+                    player_id=player.player_id,
+                    card_id=card.id,
+                    parameters={
+                        'target_pokemon_id': target_pokemon.id,
+                        'evolution_card_id': evolution_card.id
+                    },
+                    display_label=label
+                ))
+
+    return actions
