@@ -208,6 +208,11 @@ class HumanAgent(PlayerAgent):
         from models import ActionType
         from cards.registry import create_card
 
+        # Prioritize display_label for atomic actions
+        # TODO: This should be the only way to access actions eventually
+        if hasattr(action, 'display_label') and action.display_label:
+            return action.display_label
+
         def get_card_name(instance_id):
             """Helper to get card name from instance ID by looking up in state."""
             if not instance_id:

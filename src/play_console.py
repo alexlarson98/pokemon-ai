@@ -172,13 +172,18 @@ def _print_action_summary(agent, action, state: GameState):
     """Print action summary for bot players."""
     from models import ActionType
 
-    action_str = f"{action.action_type.value}"
+    # Prioritize display_label for atomic actions
+    # TODO: This should be the only way to access actions eventually
+    if hasattr(action, 'display_label') and action.display_label:
+        action_str = action.display_label
+    else:
+        action_str = f"{action.action_type.value}"
 
-    if action.action_type == ActionType.ATTACK:
-        attack_name = action.attack_name if hasattr(action, 'attack_name') else 'Attack'
-        action_str = f"ATTACK: {attack_name}"
-    elif action.action_type == ActionType.END_TURN:
-        action_str = "END_TURN"
+        if action.action_type == ActionType.ATTACK:
+            attack_name = action.attack_name if hasattr(action, 'attack_name') else 'Attack'
+            action_str = f"ATTACK: {attack_name}"
+        elif action.action_type == ActionType.END_TURN:
+            action_str = "END_TURN"
 
     print(f"\n[{agent.name}] {action_str}")
 

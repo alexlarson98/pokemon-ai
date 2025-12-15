@@ -837,6 +837,42 @@ class PokemonEngine:
         return actions
 
     # ========================================================================
+    # 4B. KNOWLEDGE LAYER (Belief-Based Action Generation for ISMCTS)
+    # ========================================================================
+
+    def initialize_deck_knowledge(self, state: GameState) -> GameState:
+        """
+        Initialize deck knowledge for both players at game start.
+
+        This should be called BEFORE drawing opening hands or setting prizes.
+        Populates initial_deck_counts with card name counts from the deck.
+
+        Args:
+            state: GameState with decks loaded but before opening hands drawn
+
+        Returns:
+            Modified GameState with initial_deck_counts populated
+        """
+        from cards.registry import create_card
+
+        for player in state.players:
+            # Count cards by name in the deck
+            card_counts = {}
+
+            for card in player.deck.cards:
+                card_def = create_card(card.card_id)
+                card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
+
+                if card_name in card_counts:
+                    card_counts[card_name] += 1
+                else:
+                    card_counts[card_name] = 1
+
+            player.initial_deck_counts = card_counts
+
+        return state
+
+    # ========================================================================
     # 5. STATE TRANSITION (The step function)
     # ========================================================================
 

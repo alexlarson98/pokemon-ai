@@ -311,6 +311,16 @@ class PlayerState(BaseModel):
     # Counters
     prizes_taken: int = Field(0, description="Number of prizes taken")
 
+    # Knowledge Layer (for Belief-Based Action Generation / ISMCTS)
+    initial_deck_counts: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Count of every card name at game start (e.g., {'Pidgey': 4, 'Rare Candy': 2})"
+    )
+    has_searched_deck: bool = Field(
+        False,
+        description="Whether player has viewed deck contents (unlocks perfect knowledge)"
+    )
+
     def reset_turn_flags(self) -> None:
         """Reset flags at end of turn (Constitution Section 3)."""
         self.supporter_played_this_turn = False

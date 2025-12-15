@@ -343,7 +343,15 @@ def quick_setup(deck1_text: str, deck2_text: str, random_seed: int = None) -> Ga
         >>> state = quick_setup(deck1, deck2, seed=42)
         >>> # Game is ready to start
     """
+    from engine import PokemonEngine
+
     state = build_game_state(deck1_text, deck2_text, random_seed)
+
+    # Initialize deck knowledge AFTER decks are loaded but BEFORE hands/prizes are set
+    # This captures the "theory" state of the deck (what cards the player knows they have)
+    engine = PokemonEngine()
+    state = engine.initialize_deck_knowledge(state)
+
     state = setup_initial_board(state, auto_mulligan=True)
     return state
 
