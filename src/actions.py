@@ -1077,20 +1077,29 @@ def force_knockout(
 # ============================================================================
 
 def _get_weakness_type(pokemon: CardInstance) -> Optional[EnergyType]:
-    """Get Pokémon's weakness type (TODO: from card definition)."""
-    # TODO: Query card registry
+    """Get Pokémon's weakness type from card definition."""
+    from cards.factory import get_card_definition
+    card_def = get_card_definition(pokemon)
+    if card_def and hasattr(card_def, 'weakness'):
+        return card_def.weakness
     return None
 
 
 def _get_resistance_type(pokemon: CardInstance) -> Optional[EnergyType]:
-    """Get Pokémon's resistance type (TODO: from card definition)."""
-    # TODO: Query card registry
+    """Get Pokémon's resistance type from card definition."""
+    from cards.factory import get_card_definition
+    card_def = get_card_definition(pokemon)
+    if card_def and hasattr(card_def, 'resistance'):
+        return card_def.resistance
     return None
 
 
 def _get_primary_type(pokemon: CardInstance) -> Optional[EnergyType]:
-    """Get Pokémon's primary type (TODO: from card definition)."""
-    # TODO: Query card registry
+    """Get Pokémon's primary type from card definition."""
+    from cards.factory import get_card_definition
+    card_def = get_card_definition(pokemon)
+    if card_def and hasattr(card_def, 'types') and len(card_def.types) > 0:
+        return card_def.types[0]
     return None
 
 
@@ -1341,3 +1350,53 @@ def validate_energy_cost(
     # TODO: Implement energy type matching with Colorless wildcards
     # For now, simple count check
     return len(pokemon.attached_energy) >= len(required_energy)
+
+
+def get_all_attached_energy(
+    state: GameState,
+    player_id: int,
+    energy_type: Optional[EnergyType] = None
+) -> List[CardInstance]:
+    """
+    Get all energy attached to a player's Pokemon (Active + Bench).
+
+    Required for attacks like Chien-Pao ex's "Hail Blade" that can discard
+    energy from ANY of the player's Pokemon.
+
+    Args:
+        state: Current game state
+        player_id: Player whose energy to count
+        energy_type: Specific energy type to filter (None = all energy)
+
+    Returns:
+        List of all energy CardInstances matching the criteria
+
+    Example:
+        >>> # Get all Water Energy attached to player's Pokemon
+        >>> water_energy = get_all_attached_energy(state, 0, EnergyType.WATER)
+        >>> len(water_energy)  # Total Water Energy count
+    """
+    from cards.factory import get_card_definition
+    player = state.get_player(player_id)
+    all_energy = []
+
+    # Get all Pokemon (active + bench)
+    all_pokemon = player.board.get_all_pokemon()
+
+    # Collect energy from all Pokemon
+    for pokemon in all_pokemon:
+        for energy_card in pokemon.attached_energy:
+            # If filtering by type, check the energy type
+            if energy_type is not None:
+                energy_def = get_card_definition(energy_card)
+                # Check if energy provides the requested type
+                if hasattr(energy_def, 'provides') and energy_type in energy_def.provides:
+                    all_energy.append(energy_card)
+                # For basic energy, check the card name
+                elif hasattr(energy_def, 'name') and energy_type.value in energy_def.name:
+                    all_energy.append(energy_card)
+            else:
+                # No filter - add all energy
+                all_energy.append(energy_card)
+
+    return all_energy

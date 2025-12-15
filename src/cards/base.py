@@ -893,6 +893,40 @@ class DataDrivenPokemon(PokemonCard):
         # Store raw JSON for attacks/abilities lookup
         self.json_data = json_data
 
+    @property
+    def attacks(self) -> List:
+        """
+        Get attacks as simple objects for engine compatibility.
+
+        Returns a list of attack objects with name and cost attributes.
+        """
+        from collections import namedtuple
+        Attack = namedtuple('Attack', ['name', 'cost', 'converted_energy_cost', 'damage', 'text'])
+
+        attacks = []
+        for attack_data in self.json_data.get('attacks', []):
+            # Parse cost
+            cost = []
+            for cost_str in attack_data.get('cost', []):
+                try:
+                    cost.append(EnergyType(cost_str))
+                except ValueError:
+                    if cost_str == "Colorless":
+                        cost.append(EnergyType.COLORLESS)
+
+            # Get converted energy cost (total number of energy required)
+            converted_cost = attack_data.get('convertedEnergyCost', len(cost))
+
+            attacks.append(Attack(
+                name=attack_data.get('name', ''),
+                cost=cost,
+                converted_energy_cost=converted_cost,
+                damage=attack_data.get('damage', ''),
+                text=attack_data.get('text', '')
+            ))
+
+        return attacks
+
     def get_attacks(self, state: 'GameState', card_instance: 'CardInstance') -> List[Dict]:
         """
         Get attacks from JSON, with logic from registry.
@@ -993,6 +1027,7 @@ class DataDrivenTrainer(TrainerCard):
         Args:
             json_data: Card data from JSON file
         """
+        # TODO: Eventually normalize it in the process of outputting to standard_cards.json
         # Helper function to normalize text (convert "Pokémon" to "Pokemon")
         def normalize_text(text: str) -> str:
             """Normalize Unicode characters to ASCII for consistent matching."""

@@ -801,38 +801,34 @@ class PokemonEngine:
 
         # Check each attack for energy requirements
         for attack in card_def.attacks:
+            # Calculate energy cost for this attack
+            provided_energy = self._calculate_provided_energy(active)
+            total_energy_count = sum(provided_energy.values())
+            final_cost = self.calculate_attack_cost(state, active, attack)
+
+            # RULE: Must have enough energy attached to use any attack
+            if total_energy_count < final_cost:
+                continue  # Skip this attack if energy cost not met
+
             # Check if card has a custom action generator for this attack
             card_logic = logic_registry.get_card_logic(active.card_id, attack.name)
 
             if isinstance(card_logic, dict) and 'generator' in card_logic:
                 # Use custom generator to create specific actions
+                # Generator is only called if energy cost is met
                 generator = card_logic['generator']
                 generated_actions = generator(state, active, player)
                 actions.extend(generated_actions)
             else:
-                # Fall back to default logic
-                # Calculate total energy provided by attached cards
-                # Architecture Fix: Supports special energy cards (e.g., Double Turbo = 2 Colorless)
-                provided_energy = self._calculate_provided_energy(active)
-
-                # Get total energy count (sum all types)
-                total_energy_count = sum(provided_energy.values())
-
-                # Calculate attack cost with reductions (e.g., Radiant Charizard)
-                # Architecture Fix: Supports cost reduction effects
-                final_cost = self.calculate_attack_cost(state, active, attack)
-
-                # RULE: Must have enough energy attached
-                # Note: This is simplified - proper implementation would check specific energy types
-                # For now, we just check total count (colorless energy rule)
-                if total_energy_count >= final_cost:
-                    actions.append(Action(
-                        action_type=ActionType.ATTACK,
-                        player_id=player.player_id,
-                        card_id=active.id,
-                        attack_name=attack.name,
-                        metadata={"target": "opponent_active", "energy_cost": final_cost}
-                    ))
+                # Fall back to default logic for attacks without custom generators
+                # Energy cost already validated above
+                actions.append(Action(
+                    action_type=ActionType.ATTACK,
+                    player_id=player.player_id,
+                    card_id=active.id,
+                    attack_name=attack.name,
+                    metadata={"target": "opponent_active", "energy_cost": final_cost}
+                ))
 
         return actions
 
@@ -1254,40 +1250,39 @@ class PokemonEngine:
                     # Heads: Attack proceeds normally
                     print(f"[Confusion] {attacker.card_id} snapped out of confusion!")
 
-            # Category 2 Fix: Calculate damage dynamically using card logic
+            # Execute attack effect (NEW: Nested Dictionary Format)
             attack_name = action.attack_name if hasattr(action, 'attack_name') else action.metadata.get('attack_name')
-            base_damage = 0
 
             if attack_name:
                 attack_logic = logic_registry.get_card_logic(attacker.card_id, attack_name)
+
                 if attack_logic:
-                    # Execute attack logic to get damage
-                    try:
-                        result = attack_logic(state, attacker, defender)
-                        if isinstance(result, int):
-                            base_damage = result
-                        elif isinstance(result, dict) and 'damage' in result:
-                            base_damage = result['damage']
-                    except Exception as e:
-                        # Attack logic failed - log warning and use 0 damage
-                        print(f"[WARNING] Attack logic failed for {attack_name}: {e}")
-                        base_damage = 0
+                    # NEW FORMAT: Nested dictionary with 'effect' function
+                    if isinstance(attack_logic, dict) and 'effect' in attack_logic:
+                        effect_func = attack_logic['effect']
+                        try:
+                            # Call effect function with (state, card, action)
+                            state = effect_func(state, attacker, action)
+                        except Exception as e:
+                            print(f"[ERROR] Attack effect failed for {attack_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    # LEGACY FORMAT: Direct function that returns damage
+                    elif callable(attack_logic):
+                        try:
+                            result = attack_logic(state, attacker, defender)
+                            if isinstance(result, int):
+                                base_damage = result
+                            elif isinstance(result, dict) and 'damage' in result:
+                                base_damage = result['damage']
+                            # Apply legacy damage
+                            defender.damage_counters += base_damage // 10
+                        except Exception as e:
+                            print(f"[WARNING] Legacy attack logic failed for {attack_name}: {e}")
+                    else:
+                        print(f"[WARNING] Invalid attack logic format for {attacker.card_id} - {attack_name}")
                 else:
-                    # Attack logic not implemented - default to 0 damage (not 60)
                     print(f"[WARNING] No attack logic found for {attacker.card_id} - {attack_name}")
-                    base_damage = 0
-
-            # TODO: Apply full damage calculation pipeline (Section 4.7)
-            # 1. Base Damage (from attack logic above)
-            # 2. Weakness (x2)
-            # 3. Resistance (-30)
-            # 4. Effects on Attacker
-            # 5. Effects on Defender
-
-            final_damage = base_damage
-
-            # Apply damage
-            defender.damage_counters += final_damage // 10
 
             # Category 2 Fix: Get max HP from card definition (not hardcoded 120)
             from cards.factory import get_max_hp
