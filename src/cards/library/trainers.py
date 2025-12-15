@@ -10,7 +10,6 @@ Action generators follow the signature:
 """
 
 from typing import List, Tuple
-from itertools import combinations  # Used by Ultra Ball and Rare Candy
 from models import GameState, CardInstance, Action, ActionType, Subtype, PlayerState
 from actions import shuffle_deck, evolve_pokemon
 from cards.factory import get_card_definition
@@ -107,12 +106,19 @@ def rare_candy_effect(state: GameState, card: CardInstance, action: Action) -> G
 
 def ultra_ball_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
     """
-    Ultra Ball - Discard 2 cards, then search deck for 1 Pokemon.
-    
-    Current Implementation:
-    - Atomic Discard: action.parameters['discard_ids'] handles the cost.
-    - Search: Currently assumes a secondary step or parameters. 
-      (Note: If Ultra Ball search becomes fully atomic later, logic goes here).
+    Ultra Ball - Discard 2 cards, then search deck for 1 Pokemon (Atomic Execution).
+
+    Expects action.parameters to contain:
+    - 'discard_ids': List of 2 card IDs to discard
+    - 'search_target_id': Card ID to search for (or None for "fail search")
+
+    Args:
+        state: Current game state
+        card: The Ultra Ball card being played
+        action: Action containing 'discard_ids' and 'search_target_id' in parameters
+
+    Returns:
+        Modified GameState
     """
     player = state.get_player(action.player_id)
 
@@ -130,7 +136,7 @@ def ultra_ball_effect(state: GameState, card: CardInstance, action: Action) -> G
         else:
             raise ValueError(f"Card {card_id} not found in hand for discard")
 
-    # Search for Pokemon (Atomic if provided, otherwise generic flow)
+    # Search for Pokemon (atomic choice from action generation)
     if search_target_id:
         target_card = next((c for c in player.deck.cards if c.id == search_target_id), None)
 
@@ -140,6 +146,13 @@ def ultra_ball_effect(state: GameState, card: CardInstance, action: Action) -> G
             if isinstance(card_def, PokemonCard):
                 player.deck.remove_card(target_card.id)
                 player.hand.add_card(target_card)
+            else:
+                # Card exists but isn't a Pokemon (shouldn't happen with proper action generation)
+                print(f"Warning: Ultra Ball target {search_target_id} is not a Pokemon")
+        else:
+            # Card not found in deck (Theory vs Reality desync)
+            print(f"Warning: Ultra Ball target {search_target_id} not found in deck")
+    # If search_target_id is None, this is a "fail search" action (discard only)
 
     # Shuffle deck
     state = shuffle_deck(state, action.player_id)
@@ -237,9 +250,10 @@ def iono_effect(state: GameState, card: CardInstance, action: Action) -> GameSta
 
 def rare_candy_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
     """
-    Generate all valid Rare Candy actions.
+    Generate all valid Rare Candy actions (Atomic Evolution Actions).
 
     Finds all valid (Basic Pokemon, Stage 2) pairs and creates an action for each.
+    Uses the evolution action utility to eliminate boilerplate.
 
     Args:
         state: Current game state
@@ -249,61 +263,29 @@ def rare_candy_actions(state: GameState, card: CardInstance, player: PlayerState
     Returns:
         List of Action objects with parameters and display_label populated
     """
-    actions = []
+    from ..utils import generate_evolution_actions
 
-    # Get all Pokemon on board (active + bench)
-    board_pokemon = player.board.get_all_pokemon()
-
-    # Get all Stage 2 Pokemon in hand
-    stage2_cards = []
-    for hand_card in player.hand.cards:
-        if hand_card.id == card.id:
-            continue  # Skip the Rare Candy itself
-        card_def = get_card_definition(hand_card)
-        if (isinstance(card_def, PokemonCard) and
-            hasattr(card_def, 'subtypes') and Subtype.STAGE_2 in card_def.subtypes):
-            stage2_cards.append((hand_card, card_def))
-
-    # Find valid pairs
-    for target_pokemon in board_pokemon:
-        # Check evolution sickness (must have been in play for at least 1 turn)
-        if target_pokemon.turns_in_play == 0:
-            continue
-
-        target_def = get_card_definition(target_pokemon)
-
-        # Check if it's a Basic Pokemon
-        if not (hasattr(target_def, 'subtypes') and Subtype.BASIC in target_def.subtypes):
-            continue
-
-        # Find Stage 2 cards that can evolve from this Basic
-        for stage2_card, stage2_def in stage2_cards:
-            # Check if the Stage 2 evolves from this Basic
-            # Note: We need to check the evolution chain - Stage 2 lists the Stage 1 it evolves from
-            # But Rare Candy allows skipping, so we need to verify the Stage 2 is in the right line
-            # For now, we'll use a simplified check based on name matching
-            if hasattr(stage2_def, 'evolves_from'):
-                # TODO: Proper evolution chain validation
-                # For now, create action for all Stage 2 cards (engine will validate)
-                actions.append(Action(
-                    action_type=ActionType.PLAY_ITEM,
-                    player_id=player.player_id,
-                    card_id=card.id,
-                    parameters={
-                        'target_pokemon_id': target_pokemon.id,
-                        'evolution_card_id': stage2_card.id
-                    },
-                    display_label=f"Rare Candy: Evolve {target_def.name} into {stage2_def.name}"
-                ))
-
-    return actions
+    return generate_evolution_actions(
+        state=state,
+        player=player,
+        card=card,
+        target_subtype=Subtype.BASIC,
+        evolution_subtype=Subtype.STAGE_2,
+        label_template="Rare Candy: Evolve {target} into {evolution}",
+        skip_stage=True
+    )
 
 
 def ultra_ball_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
     """
-    Generate all valid Ultra Ball actions.
+    Generate all valid Ultra Ball actions (Atomic Discard + Search Actions).
 
-    Creates an action for every possible pair of cards to discard.
+    Creates actions for every unique discard pair × search target combination.
+
+    De-duplication: Groups cards by name to avoid duplicate actions for multiple
+    copies of the same card (e.g., 2x Gimmighoul creates only 1 discard pair).
+
+    Atomic Search: Includes search target in the action upfront for MCTS.
 
     Args:
         state: Current game state
@@ -313,6 +295,9 @@ def ultra_ball_actions(state: GameState, card: CardInstance, player: PlayerState
     Returns:
         List of Action objects with parameters and display_label populated
     """
+    from ..utils import get_deck_search_candidates
+    from collections import defaultdict
+
     actions = []
 
     # Get all cards in hand except Ultra Ball itself
@@ -322,25 +307,84 @@ def ultra_ball_actions(state: GameState, card: CardInstance, player: PlayerState
     if len(discardable_cards) < 2:
         return actions
 
-    # Generate all possible pairs of cards to discard
-    for discard_pair in combinations(discardable_cards, 2):
-        card1, card2 = discard_pair
+    # Group cards by name for de-duplication
+    cards_by_name = defaultdict(list)
+    for c in discardable_cards:
+        card_def = get_card_definition(c)
+        card_name = card_def.name if card_def and hasattr(card_def, 'name') else c.card_id
+        cards_by_name[card_name].append(c)
 
-        # Get card names for display
-        card1_def = get_card_definition(card1)
-        card2_def = get_card_definition(card2)
-        card1_name = card1_def.name if card1_def and hasattr(card1_def, 'name') else card1.card_id
-        card2_name = card2_def.name if card2_def and hasattr(card2_def, 'name') else card2.card_id
+    # Get unique card names
+    card_names = sorted(cards_by_name.keys())
 
+    # Generate unique discard pairs (by name)
+    unique_discard_pairs = []
+    for i, name1 in enumerate(card_names):
+        # Same card name twice (if we have 2+ copies)
+        if len(cards_by_name[name1]) >= 2:
+            unique_discard_pairs.append((name1, name1))
+
+        # Different card names
+        for name2 in card_names[i+1:]:
+            unique_discard_pairs.append((name1, name2))
+
+    # Get search candidates using Knowledge Layer (any Pokemon)
+    def is_pokemon(card_def):
+        return isinstance(card_def, PokemonCard)
+
+    search_candidates = get_deck_search_candidates(state, player, is_pokemon)
+
+    # Map search candidate names to actual card instances in deck
+    deck_cards_by_name = {}
+    for card_name in search_candidates:
+        matching_cards = [
+            c for c in player.deck.cards
+            if get_card_definition(c).name == card_name
+        ]
+        if matching_cards:
+            deck_cards_by_name[card_name] = matching_cards
+
+    # Generate cartesian product: discard pairs × search targets
+    for discard_name1, discard_name2 in unique_discard_pairs:
+        # Get actual card instances for this discard pair
+        discard_card1 = cards_by_name[discard_name1][0]
+        discard_card2 = cards_by_name[discard_name2][1 if discard_name1 == discard_name2 else 0]
+
+        # Format discard display (sorted for consistency)
+        if discard_name1 == discard_name2:
+            discard_display = f"{discard_name1}, {discard_name2}"
+        else:
+            sorted_names = sorted([discard_name1, discard_name2])
+            discard_display = f"{sorted_names[0]}, {sorted_names[1]}"
+
+        # Option 1: Fail search (discard only, no search target)
         actions.append(Action(
             action_type=ActionType.PLAY_ITEM,
             player_id=player.player_id,
             card_id=card.id,
             parameters={
-                'discard_ids': [card1.id, card2.id]
+                'discard_ids': [discard_card1.id, discard_card2.id],
+                'search_target_id': None
             },
-            display_label=f"Ultra Ball (Discard {card1_name}, {card2_name})"
+            display_label=f"Ultra Ball (Discard {discard_display} → Fail Search)"
         ))
+
+        # Options 2+: Search for each candidate
+        for search_name in search_candidates:
+            search_cards = deck_cards_by_name.get(search_name, [])
+            if search_cards:
+                search_target = search_cards[0]
+
+                actions.append(Action(
+                    action_type=ActionType.PLAY_ITEM,
+                    player_id=player.player_id,
+                    card_id=card.id,
+                    parameters={
+                        'discard_ids': [discard_card1.id, discard_card2.id],
+                        'search_target_id': search_target.id
+                    },
+                    display_label=f"Ultra Ball (Discard {discard_display} → Search {search_name})"
+                ))
 
     return actions
 
