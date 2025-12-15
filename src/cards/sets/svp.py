@@ -7,6 +7,7 @@ For reprints, this module imports logic from the set where the card was first re
 """
 
 # Import Chien-Pao ex logic from sv2 (Paldea Evolved - first release)
+from cards.library.trainers import iono_actions, iono_effect
 from .sv2 import chien_pao_ex_hail_blade_actions, chien_pao_ex_hail_blade_effect
 
 
@@ -21,5 +22,12 @@ SVP_LOGIC = {
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
+    },
+
+    # TRAINERS
+    
+    "svp-124": {  # Iono
+        "effect": iono_effect,
+        "generator": iono_actions,
     },
 }

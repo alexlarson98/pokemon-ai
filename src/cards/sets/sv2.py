@@ -139,34 +139,40 @@ def chien_pao_ex_hail_blade_effect(state: GameState, card: CardInstance, action:
 # ============================================================================
 
 SV2_LOGIC = {
-    # Chien-Pao ex - All printings from sv2
-    "sv2-61": {
+    "sv2-61": {  # Chien Pao ex
         "Hail Blade": {
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
-    "sv2-236": {  # Secret Rare
+    "sv2-236": {  # Chien Pao ex
         "Hail Blade": {
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
-    "sv2-261": {  # Illustration Rare
+    "sv2-261": {  # Chien Pao ex
         "Hail Blade": {
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
-    "sv2-274": {  # Special Illustration Rare
+    "sv2-274": {  # Chien Pao ex
         "Hail Blade": {
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
-
-    # Iono
-    "sv2-185": {
+    
+    "sv2-185": {  # Iono
+        "effect": iono_effect,
+        "generator": iono_actions,
+    },
+    "sv2-254": {  # Iono
+        "effect": iono_effect,
+        "generator": iono_actions,
+    },
+    "sv2-269": {  # Iono
         "effect": iono_effect,
         "generator": iono_actions,
     },
