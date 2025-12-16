@@ -24,8 +24,10 @@ def buddy_buddy_poffin_effect(state: GameState, card: CardInstance, action: Acti
     """
     Buddy-Buddy Poffin - Search deck for specific Basic Pokemon (Atomic Execution).
 
-    Expects action.parameters['target_pokemon_ids'] to contain the IDs of the 
+    Expects action.parameters['target_pokemon_ids'] to contain the IDs of the
     cards chosen by the player/agent during the atomic action generation phase.
+
+    Supports belief-based IDs (format: 'belief:CardName') for ISMCTS exploration.
 
     Args:
         state: Current game state
@@ -47,19 +49,21 @@ def buddy_buddy_poffin_effect(state: GameState, card: CardInstance, action: Acti
     # Retrieve specific cards from deck
     cards_to_bench = []
 
-    # We iterate a copy of the deck to safely modify it later
-    # Note: We look for specific IDs because the atomic action selected specific instances
-    for target_id in target_ids:
-        # Find the card in the deck by ID
-        found_card = next((c for c in player.deck.cards if c.id == target_id), None)
+    # Define search criteria for Buddy-Buddy Poffin (Basic Pokemon with HP <= 70)
+    from cards.base import Subtype
+    from cards.utils import resolve_search_target
 
+    def is_basic_hp_70_or_less(card_def):
+        return (isinstance(card_def, PokemonCard) and
+                hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes and
+                hasattr(card_def, 'hp') and card_def.hp <= 70)
+
+    # Resolve each target (handles both real IDs and belief placeholders)
+    for target_id in target_ids:
+        found_card = resolve_search_target(player, target_id, is_basic_hp_70_or_less)
         if found_card:
             cards_to_bench.append(found_card)
-        else:
-            # This handles the rare "Theory vs Reality" desync where the AI thought
-            # a card was there (Prized logic error) but it wasn't.
-            # In a perfect engine, this branch is never hit.
-            print(f"Warning: Atomic target {target_id} not found in deck.")
+        # ISMCTS: If not found, partial success is still valuable (finding other cards)
 
     # Execute the move
     for deck_card in cards_to_bench:
@@ -70,6 +74,9 @@ def buddy_buddy_poffin_effect(state: GameState, card: CardInstance, action: Acti
 
     # Shuffle deck
     state = shuffle_deck(state, action.player_id)
+
+    # Mark that player has searched deck (perfect knowledge)
+    player.has_searched_deck = True
 
     return state
 
@@ -112,6 +119,8 @@ def ultra_ball_effect(state: GameState, card: CardInstance, action: Action) -> G
     - 'discard_ids': List of 2 card IDs to discard
     - 'search_target_id': Card ID to search for (or None for "fail search")
 
+    Supports belief-based IDs (format: 'belief:CardName') for ISMCTS exploration.
+
     Args:
         state: Current game state
         card: The Ultra Ball card being played
@@ -138,24 +147,26 @@ def ultra_ball_effect(state: GameState, card: CardInstance, action: Action) -> G
 
     # Search for Pokemon (atomic choice from action generation)
     if search_target_id:
-        target_card = next((c for c in player.deck.cards if c.id == search_target_id), None)
+        from cards.utils import resolve_search_target
+
+        # Define criteria: any Pokemon
+        def is_pokemon(card_def):
+            return isinstance(card_def, PokemonCard)
+
+        # Resolve target (handles both real IDs and belief placeholders)
+        target_card = resolve_search_target(player, search_target_id, is_pokemon)
 
         if target_card:
-            card_def = get_card_definition(target_card)
-            # Verify it's a Pokemon
-            if isinstance(card_def, PokemonCard):
-                player.deck.remove_card(target_card.id)
-                player.hand.add_card(target_card)
-            else:
-                # Card exists but isn't a Pokemon (shouldn't happen with proper action generation)
-                print(f"Warning: Ultra Ball target {search_target_id} is not a Pokemon")
-        else:
-            # Card not found in deck (Theory vs Reality desync)
-            print(f"Warning: Ultra Ball target {search_target_id} not found in deck")
+            player.deck.remove_card(target_card.id)
+            player.hand.add_card(target_card)
+        # ISMCTS: If target not found, this is expected for belief-based searches
     # If search_target_id is None, this is a "fail search" action (discard only)
 
     # Shuffle deck
     state = shuffle_deck(state, action.player_id)
+
+    # Mark that player has searched deck (perfect knowledge)
+    player.has_searched_deck = True
 
     return state
 
@@ -170,6 +181,8 @@ def nest_ball_effect(state: GameState, card: CardInstance, action: Action) -> Ga
 
     Expects action.parameters['target_pokemon_id'] from the atomic action.
     This respects the atomic choice made during action generation.
+
+    Supports belief-based IDs (format: 'belief:CardName') for ISMCTS exploration.
     """
     player = state.get_player(action.player_id)
     target_pokemon_id = action.parameters.get('target_pokemon_id')
@@ -180,28 +193,29 @@ def nest_ball_effect(state: GameState, card: CardInstance, action: Action) -> Ga
         return state
 
     if target_pokemon_id:
-        # Atomic execution: Retrieve the specific card chosen by the action
-        target_card = next((c for c in player.deck.cards if c.id == target_pokemon_id), None)
+        from cards.base import Subtype
+        from cards.utils import resolve_search_target
+
+        # Define criteria: Basic Pokemon
+        def is_basic(card_def):
+            return (isinstance(card_def, PokemonCard) and
+                    hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes)
+
+        # Resolve target (handles both real IDs and belief placeholders)
+        target_card = resolve_search_target(player, target_pokemon_id, is_basic)
 
         if target_card:
-            # Validate the card still exists and is a Basic Pokemon
-            card_def = get_card_definition(target_card)
-            if (isinstance(card_def, PokemonCard) and
-                hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes):
-
-                # Execute the atomic choice
-                player.deck.remove_card(target_card.id)
-                player.board.add_to_bench(target_card)
-                target_card.turns_in_play = 0
-            else:
-                # Card no longer valid (shouldn't happen, but safety check)
-                print(f"Warning: Nest Ball target {target_pokemon_id} is not a valid Basic Pokemon")
-        else:
-            # Card not found in deck (Theory vs Reality desync)
-            print(f"Warning: Nest Ball target {target_pokemon_id} not found in deck")
+            # Execute the atomic choice
+            player.deck.remove_card(target_card.id)
+            player.board.add_to_bench(target_card)
+            target_card.turns_in_play = 0
+        # ISMCTS: If target not found, this is expected for belief-based searches
 
     # Shuffle deck
     state = shuffle_deck(state, action.player_id)
+
+    # Mark that player has searched deck (perfect knowledge)
+    player.has_searched_deck = True
 
     return state
 
@@ -334,17 +348,30 @@ def ultra_ball_actions(state: GameState, card: CardInstance, player: PlayerState
 
     search_candidates = get_deck_search_candidates(state, player, is_pokemon)
 
-    # Map search candidate names to actual card instances in deck
-    deck_cards_by_name = {}
+    # Group deck cards by FUNCTIONAL ID
+    # ISMCTS: Also include belief-based placeholders for candidates not in deck
+    deck_cards_by_functional_id = {}
     for card_name in search_candidates:
         matching_cards = [
             c for c in player.deck.cards
             if get_card_definition(c).name == card_name
+            and is_pokemon(get_card_definition(c))
         ]
-        if matching_cards:
-            deck_cards_by_name[card_name] = matching_cards
 
-    # Generate cartesian product: discard pairs × search targets
+        if matching_cards:
+            # Card exists in deck - group by functional ID
+            for card_instance in matching_cards:
+                functional_id = player.functional_id_map.get(card_instance.card_id)
+                if functional_id:
+                    if functional_id not in deck_cards_by_functional_id:
+                        deck_cards_by_functional_id[functional_id] = []
+                    deck_cards_by_functional_id[functional_id].append(card_instance)
+        elif not player.has_searched_deck:
+            # ISMCTS: Belief says card might be searchable but it's not in deck
+            # Create placeholder for belief-based action (card likely in prizes)
+            deck_cards_by_functional_id[card_name] = [None]
+
+    # Generate cartesian product: discard pairs × search targets (by functional ID)
     for discard_name1, discard_name2 in unique_discard_pairs:
         # Get actual card instances for this discard pair
         discard_card1 = cards_by_name[discard_name1][0]
@@ -369,22 +396,43 @@ def ultra_ball_actions(state: GameState, card: CardInstance, player: PlayerState
             display_label=f"Ultra Ball (Discard {discard_display} → Fail Search)"
         ))
 
-        # Options 2+: Search for each candidate
-        for search_name in search_candidates:
-            search_cards = deck_cards_by_name.get(search_name, [])
+        # Options 2+: Search for each functional type
+        for functional_id, search_cards in deck_cards_by_functional_id.items():
             if search_cards:
                 search_target = search_cards[0]
 
-                actions.append(Action(
-                    action_type=ActionType.PLAY_ITEM,
-                    player_id=player.player_id,
-                    card_id=card.id,
-                    parameters={
-                        'discard_ids': [discard_card1.id, discard_card2.id],
-                        'search_target_id': search_target.id
-                    },
-                    display_label=f"Ultra Ball (Discard {discard_display} → Search {search_name})"
-                ))
+                if search_target is None:
+                    # Belief-based action: card not in deck but believed to be searchable
+                    # functional_id is actually the card name in this case
+                    search_name = functional_id
+                    target_id = f"belief:{search_name}"  # Placeholder ID for belief-based search
+
+                    actions.append(Action(
+                        action_type=ActionType.PLAY_ITEM,
+                        player_id=player.player_id,
+                        card_id=card.id,
+                        parameters={
+                            'discard_ids': [discard_card1.id, discard_card2.id],
+                            'search_target_id': target_id,  # Special belief-based ID
+                            'search_target_name': search_name  # Name for effect execution
+                        },
+                        display_label=f"Ultra Ball (Discard {discard_display} → Search {search_name})"
+                    ))
+                else:
+                    # Real action: card is actually in deck
+                    search_def = get_card_definition(search_target)
+                    search_name = search_def.name if search_def else "Unknown"
+
+                    actions.append(Action(
+                        action_type=ActionType.PLAY_ITEM,
+                        player_id=player.player_id,
+                        card_id=card.id,
+                        parameters={
+                            'discard_ids': [discard_card1.id, discard_card2.id],
+                            'search_target_id': search_target.id
+                        },
+                        display_label=f"Ultra Ball (Discard {discard_display} → Search {search_name})"
+                    ))
 
     return actions
 

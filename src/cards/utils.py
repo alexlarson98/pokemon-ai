@@ -12,6 +12,64 @@ from cards.registry import create_card
 from cards.factory import get_card_definition
 
 
+def resolve_search_target(
+    player: PlayerState,
+    target_id: str,
+    criteria_func: Optional[Callable] = None
+) -> Optional[CardInstance]:
+    """
+    Resolve a search target ID to an actual card in the deck.
+
+    Handles both:
+    - Regular card IDs: Direct lookup by card.id
+    - Belief-based IDs (format: 'belief:CardName'): Search by name and criteria
+
+    This is the central utility for all deck search effect handlers, ensuring
+    consistent behavior for ISMCTS belief-based searches.
+
+    Args:
+        player: Player performing the search
+        target_id: Either a card instance ID or a belief placeholder ('belief:CardName')
+        criteria_func: Optional criteria function to validate the card
+                      (e.g., lambda c: Subtype.BASIC in c.subtypes)
+
+    Returns:
+        CardInstance if found, None if not found (expected for belief searches)
+
+    Example:
+        >>> # Regular search
+        >>> card = resolve_search_target(player, 'card_abc123')
+
+        >>> # Belief-based search
+        >>> def is_basic(card_def):
+        >>>     return Subtype.BASIC in card_def.subtypes
+        >>> card = resolve_search_target(player, 'belief:Klefki', is_basic)
+    """
+    # Check if this is a belief-based search (ISMCTS)
+    if target_id.startswith('belief:'):
+        # Extract card name from belief placeholder
+        card_name = target_id.split(':', 1)[1]
+
+        # Try to find any card with this name in deck that meets criteria
+        for deck_card in player.deck.cards:
+            card_def = get_card_definition(deck_card)
+            if not card_def or card_def.name != card_name:
+                continue
+
+            # If criteria provided, check it
+            if criteria_func and not criteria_func(card_def):
+                continue
+
+            # Found matching card
+            return deck_card
+
+        # ISMCTS: Card not found (likely in prizes) - this is expected
+        return None
+    else:
+        # Regular search: Find the card in the deck by exact ID
+        return next((c for c in player.deck.cards if c.id == target_id), None)
+
+
 def get_deck_search_candidates(
     state: GameState,
     player: PlayerState,
@@ -45,7 +103,7 @@ def get_deck_search_candidates(
         >>> candidates = get_deck_search_candidates(state, player, is_basic)
         >>> # Returns: ["Pidgey", "Dreepy", ...] based on beliefs
     """
-    # Check knowledge state
+    # Check knowledge state - Perfect Knowledge Mode
     if player.has_searched_deck:
         # Perfect knowledge - return actual deck contents
         searchable_cards = set()
@@ -80,6 +138,8 @@ def get_deck_search_candidates(
     # Count and subtract visible cards
     for zone in visible_zones:
         for card in zone:
+            if card is None:
+                continue  # Skip None entries
             card_def = create_card(card.card_id)
             card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
@@ -104,6 +164,8 @@ def get_deck_search_candidates(
             # Try to find this card in visible zones to get its definition
             for zone in visible_zones:
                 for card in zone:
+                    if card is None:
+                        continue  # Skip None entries
                     card_def = create_card(card.card_id)
                     if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
                         example_card = card_def
@@ -111,22 +173,31 @@ def get_deck_search_candidates(
                 if example_card:
                     break
 
-            # If not found in visible zones, search the deck (this reveals information)
-            if not example_card:
-                for card in player.deck.cards:
-                    card_def = create_card(card.card_id)
-                    if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
-                        example_card = card_def
-                        break
-
-            # Apply filter if we found the card definition
+            # If found in visible zones, apply criteria
             if example_card:
                 if criteria_func(example_card):
                     candidates.append(card_name)
+            # If not found in visible zones, search the deck (this reveals information)
             else:
-                # Can't find card definition, so we can't apply criteria
-                # Include it as a candidate anyway (conservative approach)
-                candidates.append(card_name)
+                # Check ALL cards with this name in the deck - any version that passes
+                # the criteria makes this card name searchable
+                for card in player.deck.cards:
+                    card_def = create_card(card.card_id)
+                    if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
+                        # Found a card with this name - check if it passes criteria
+                        if criteria_func(card_def):
+                            candidates.append(card_name)
+                            break  # Found at least one valid version, include it
+                        # Keep the first card def in case none pass (for error handling)
+                        if not example_card:
+                            example_card = card_def
+                else:
+                    # No card with this name passed criteria
+                    # If we found at least one card with the name but none passed, don't include it
+                    if not example_card:
+                        # Can't find card definition, so we can't apply criteria
+                        # Include it as a candidate anyway (conservative approach)
+                        candidates.append(card_name)
 
     return sorted(candidates)
 
@@ -194,34 +265,69 @@ def generate_search_actions(
     # Get searchable candidates using the Knowledge Layer (Belief Engine)
     candidate_names = get_deck_search_candidates(state, player, criteria)
 
-    # Map candidate names to actual card instances in deck
-    deck_cards_by_name = {}
+    # Group cards by FUNCTIONAL ID (not just name)
+    # This ensures that different versions of the same Pokemon create separate actions
+    # Example: Charmander HP=70 and Charmander HP=80 get different actions
+    # ISMCTS: Also include belief-based placeholders for candidates not in deck
+    deck_cards_by_functional_id = {}
     for card_name in candidate_names:
+        # Get all matching cards for this name that pass criteria
         matching_cards = [
             c for c in player.deck.cards
             if get_card_definition(c).name == card_name
+            and criteria(get_card_definition(c))
         ]
+
         if matching_cards:
-            deck_cards_by_name[card_name] = matching_cards
+            # Card exists in deck - group by functional ID
+            for card_instance in matching_cards:
+                functional_id = player.functional_id_map.get(card_instance.card_id)
+
+                if functional_id:
+                    if functional_id not in deck_cards_by_functional_id:
+                        deck_cards_by_functional_id[functional_id] = []
+                    deck_cards_by_functional_id[functional_id].append(card_instance)
+        elif not player.has_searched_deck:
+            # ISMCTS: Belief says card might be searchable but it's not in deck
+            # Create placeholder for belief-based action (card likely in prizes)
+            deck_cards_by_functional_id[card_name] = [None]
 
     # Generate actions based on count
     if count == 1:
-        # Single search: One action per candidate
-        for card_name, deck_cards in deck_cards_by_name.items():
+        # Single search: One action per FUNCTIONAL type (not per name)
+        for functional_id, deck_cards in deck_cards_by_functional_id.items():
             if deck_cards:
-                # For single searches, use the first matching card
                 target_card = deck_cards[0]
 
-                # Format label
-                label = label_template.replace('{name}', card_name)
+                if target_card is None:
+                    # Belief-based action: card not in deck but believed to be searchable
+                    # functional_id is actually the card name in this case
+                    card_name = functional_id
+                    target_id = f"belief:{card_name}"
+                    label = label_template.replace('{name}', card_name)
 
-                # Build parameters - handle both single ID and list formats
-                if parameter_key.endswith('_ids'):
-                    # List format (e.g., 'target_pokemon_ids')
-                    params = {parameter_key: [target_card.id]}
+                    # Build parameters with belief placeholder ID
+                    if parameter_key.endswith('_ids'):
+                        params = {
+                            parameter_key: [target_id],
+                            f'{parameter_key[:-4]}_name': card_name  # Remove '_ids', add '_name'
+                        }
+                    else:
+                        params = {
+                            parameter_key: target_id,
+                            f'{parameter_key}_name': card_name  # Add name parameter for effect execution
+                        }
                 else:
-                    # Single ID format (e.g., 'target_pokemon_id')
-                    params = {parameter_key: target_card.id}
+                    # Real action: card is actually in deck
+                    card_def = get_card_definition(target_card)
+                    card_name = card_def.name if card_def else "Unknown"
+                    label = label_template.replace('{name}', card_name)
+
+                    # Build parameters - handle both single ID and list formats
+                    if parameter_key.endswith('_ids'):
+                        params = {parameter_key: [target_card.id]}
+                    else:
+                        params = {parameter_key: target_card.id}
 
                 actions.append(Action(
                     action_type=ActionType.PLAY_ITEM,
@@ -233,12 +339,42 @@ def generate_search_actions(
 
     elif count == 2:
         # Double search: Generate single + pair actions
-        # First, generate single search actions (search for just 1)
-        for card_name, deck_cards in deck_cards_by_name.items():
-            if deck_cards:
-                target_card = deck_cards[0]
+        # Build a flat list of all valid card instances (including belief placeholders)
+        all_valid_cards = []
+        for functional_id, deck_cards in deck_cards_by_functional_id.items():
+            all_valid_cards.extend(deck_cards)
 
-                # Format label for single search
+        # Generate single search actions (search for just 1)
+        # Need to handle both real cards and belief placeholders
+        seen_functional_ids = set()
+
+        for functional_id, deck_cards in deck_cards_by_functional_id.items():
+            if functional_id in seen_functional_ids:
+                continue
+            seen_functional_ids.add(functional_id)
+
+            target_card = deck_cards[0]
+
+            if target_card is None:
+                # Belief-based action
+                card_name = functional_id
+                target_id = f"belief:{card_name}"
+                label = label_template.replace('{names}', card_name)
+
+                actions.append(Action(
+                    action_type=ActionType.PLAY_ITEM,
+                    player_id=player.player_id,
+                    card_id=card.id,
+                    parameters={
+                        parameter_key: [target_id],
+                        f'{parameter_key[:-4]}_name': card_name
+                    },
+                    display_label=label
+                ))
+            else:
+                # Real action
+                card_def = get_card_definition(target_card)
+                card_name = card_def.name if card_def else "Unknown"
                 label = label_template.replace('{names}', card_name)
 
                 actions.append(Action(
@@ -251,48 +387,77 @@ def generate_search_actions(
 
         # Generate pair search actions (if bench has space for 2)
         if bench_space >= 2:
-            for name_pair in combinations(candidate_names, 2):
-                name1, name2 = name_pair
+            # Build list of (functional_id, card_instance_or_none) tuples
+            # This preserves the card name for belief placeholders
+            functional_cards = []
+            for functional_id, deck_cards in deck_cards_by_functional_id.items():
+                for card_instance in deck_cards:
+                    functional_cards.append((functional_id, card_instance))
 
-                # Get actual cards for each name
-                card1 = deck_cards_by_name.get(name1, [None])[0]
-                card2 = deck_cards_by_name.get(name2, [None])[0]
+            seen_functional_pairs = set()
 
-                if card1 and card2:
-                    # Format label for pair search
+            for card_pair in combinations(functional_cards, 2):
+                (func_id1, card1), (func_id2, card2) = card_pair
+
+                # Create a sorted tuple for de-duplication
+                # (Charmander HP=70, Pidgey) and (Charmander HP=70, Pidgey) should be the same
+                functional_pair = tuple(sorted([func_id1, func_id2]))
+
+                # Skip if we've already created an action for this functional pair
+                if functional_pair in seen_functional_pairs:
+                    continue
+
+                seen_functional_pairs.add(functional_pair)
+
+                # Get display names and build parameters (handle belief placeholders)
+                # For belief placeholders, func_id is the card name
+                if card1 is None:
+                    name1 = func_id1  # Card name
+                    id1 = f"belief:{name1}"
+                else:
+                    card1_def = get_card_definition(card1)
+                    name1 = card1_def.name if card1_def else "Unknown"
+                    id1 = card1.id
+
+                if card2 is None:
+                    name2 = func_id2  # Card name
+                    id2 = f"belief:{name2}"
+                else:
+                    card2_def = get_card_definition(card2)
+                    name2 = card2_def.name if card2_def else "Unknown"
+                    id2 = card2.id
+
+                # Format display label
+                if name1 == name2:
+                    # Same name: show as "Name, Name" to indicate 2 copies
                     label = label_template.replace('{names}', f"{name1}, {name2}")
+                else:
+                    # Different names: sort for consistency
+                    sorted_names = sorted([name1, name2])
+                    label = label_template.replace('{names}', f"{sorted_names[0]}, {sorted_names[1]}")
 
-                    actions.append(Action(
-                        action_type=ActionType.PLAY_ITEM,
-                        player_id=player.player_id,
-                        card_id=card.id,
-                        parameters={parameter_key: [card1.id, card2.id]},
-                        display_label=label
-                    ))
-
-    else:
-        # For count > 2, generate all possible combinations
-        # (Not currently used, but included for completeness)
-        for name_combo in combinations(candidate_names, min(count, len(candidate_names))):
-            # Get actual cards for each name
-            target_cards = []
-            for name in name_combo:
-                cards = deck_cards_by_name.get(name, [])
-                if cards:
-                    target_cards.append(cards[0])
-
-            if len(target_cards) == len(name_combo):
-                # All cards found - create action
-                names_str = ', '.join(name_combo)
-                label = label_template.replace('{names}', names_str)
+                # Build parameters - add name hints for belief placeholders
+                params = {parameter_key: [id1, id2]}
+                if card1 is None or card2 is None:
+                    # Add name parameters for effect execution to use
+                    params[f'{parameter_key[:-4]}_names'] = [name1, name2]
 
                 actions.append(Action(
                     action_type=ActionType.PLAY_ITEM,
                     player_id=player.player_id,
                     card_id=card.id,
-                    parameters={parameter_key: [c.id for c in target_cards]},
+                    parameters=params,
                     display_label=label
                 ))
+
+    else:
+        # TODO: Implement count > 2 support using functional IDs
+        # Currently no cards search for more than 2 Pokemon at once
+        # When implementing, follow the same pattern:
+        #   1. Generate combinations from all_valid_cards
+        #   2. De-duplicate based on functional ID tuples
+        #   3. Build display labels from card names
+        pass
 
     return actions
 

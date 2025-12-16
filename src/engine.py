@@ -839,33 +839,120 @@ class PokemonEngine:
         """
         Initialize deck knowledge for both players at game start.
 
-        This should be called BEFORE drawing opening hands or setting prizes.
-        Populates initial_deck_counts with card name counts from the deck.
+        Captures the composition of ALL 60 cards in the player's deck, regardless of
+        where they are currently located (deck, hand, board, prizes, discard).
+
+        This function should be called AFTER decks are loaded but ideally BEFORE
+        any cards are moved to other zones. However, it's designed to handle cases
+        where cards have already been moved (e.g., in test scenarios).
 
         Args:
-            state: GameState with decks loaded but before opening hands drawn
+            state: GameState with player decks loaded
 
         Returns:
-            Modified GameState with initial_deck_counts populated
+            Modified GameState with knowledge layer initialized
         """
         from cards.registry import create_card
+        from cards.base import PokemonCard
 
         for player in state.players:
-            # Count cards by name in the deck
+            # Name-based counts for belief engine (ISMCTS)
             card_counts = {}
 
-            for card in player.deck.cards:
+            # Functional ID mapping for action generation
+            functional_map = {}
+
+            # Collect ALL cards owned by this player from ALL zones
+            all_player_cards = []
+
+            # Deck
+            all_player_cards.extend(player.deck.cards)
+
+            # Hand
+            all_player_cards.extend(player.hand.cards)
+
+            # Discard
+            all_player_cards.extend(player.discard.cards)
+
+            # Prizes
+            all_player_cards.extend(player.prizes.cards)
+
+            # Board (active + bench)
+            board_pokemon = player.board.get_all_pokemon()
+            all_player_cards.extend([p for p in board_pokemon if p is not None])
+
+            # Attached cards (energy, tools on Pokemon)
+            for pokemon in board_pokemon:
+                if pokemon:
+                    all_player_cards.extend(pokemon.attached_energy)
+                    all_player_cards.extend(pokemon.attached_tools)
+
+            # Count all cards
+            for card in all_player_cards:
+                if card is None:
+                    continue
+
                 card_def = create_card(card.card_id)
                 card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
+                # Count by name for belief engine
                 if card_name in card_counts:
                     card_counts[card_name] += 1
                 else:
                     card_counts[card_name] = 1
 
+                # Compute functional ID for action generation
+                if isinstance(card_def, PokemonCard):
+                    functional_id = self._compute_functional_id(card_def)
+                else:
+                    # Non-Pokemon cards: use name as functional ID
+                    functional_id = card_name
+
+                # Map this card instance to its functional ID
+                functional_map[card.card_id] = functional_id
+
             player.initial_deck_counts = card_counts
+            player.functional_id_map = functional_map
 
         return state
+
+    def _compute_functional_id(self, card_def) -> str:
+        """
+        Compute a functional ID for a Pokemon card based on gameplay-relevant properties.
+
+        Cards with the same functional ID are interchangeable for deck search purposes.
+
+        Args:
+            card_def: PokemonCard definition
+
+        Returns:
+            Functional ID string (e.g., "Charmander|70|[attack1,attack2]|[ability1]")
+        """
+        name = card_def.name
+        hp = card_def.hp if hasattr(card_def, 'hp') else 0
+
+        # Sort attacks by name for consistent ordering
+        attacks = []
+        if hasattr(card_def, 'attacks'):
+            for attack in card_def.attacks:
+                attack_sig = f"{attack.name}:{attack.damage if hasattr(attack, 'damage') else ''}"
+                attacks.append(attack_sig)
+        attacks_str = ','.join(sorted(attacks))
+
+        # Sort abilities by name
+        abilities = []
+        if hasattr(card_def, 'abilities'):
+            for ability in card_def.abilities:
+                abilities.append(ability.name)
+        abilities_str = ','.join(sorted(abilities))
+
+        # Include subtypes for evolution stage differentiation
+        subtypes = []
+        if hasattr(card_def, 'subtypes'):
+            subtypes = [str(s.value) if hasattr(s, 'value') else str(s) for s in card_def.subtypes]
+        subtypes_str = ','.join(sorted(subtypes))
+
+        return f"{name}|{hp}|{subtypes_str}|{attacks_str}|{abilities_str}"
 
     # ========================================================================
     # 5. STATE TRANSITION (The step function)

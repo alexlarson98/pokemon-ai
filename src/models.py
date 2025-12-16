@@ -314,7 +314,19 @@ class PlayerState(BaseModel):
     # Knowledge Layer (for Belief-Based Action Generation / ISMCTS)
     initial_deck_counts: Dict[str, int] = Field(
         default_factory=dict,
-        description="Count of every card name at game start (e.g., {'Pidgey': 4, 'Rare Candy': 2})"
+        description=(
+            "Name-based card counts capturing all 60 cards at game start. "
+            "Used by belief engine for ISMCTS - player doesn't know which functional "
+            "versions exist, only card names. Example: {'Charmander': 2, 'Fire Energy': 12}"
+        )
+    )
+    functional_id_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Maps card_id -> functional_id for ALL player's cards. Used by action generation "
+            "to create separate actions for functionally different versions of the same card. "
+            "Example: card_id='abc123' -> 'Charmander|70|Basic|Ember:30|'"
+        )
     )
     has_searched_deck: bool = Field(
         False,
