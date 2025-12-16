@@ -402,9 +402,17 @@ def buddy_buddy_poffin_actions(state: GameState, card: CardInstance, player: Pla
         player: Player who owns the card
 
     Returns:
-        List of Actions for single and double searches
+        List of Actions for single and double searches, plus fail search option
     """
     from ..utils import generate_search_actions
+
+    actions = []
+
+    # Check bench space
+    bench_space = player.board.max_bench_size - player.board.get_bench_count()
+
+    if bench_space <= 0 or player.deck.is_empty():
+        return actions
 
     # Define search criteria: Basic Pokémon with HP ≤ 70
     def is_basic_hp_70_or_less(card_def):
@@ -412,7 +420,7 @@ def buddy_buddy_poffin_actions(state: GameState, card: CardInstance, player: Pla
                 hasattr(card_def, 'hp') and card_def.hp <= 70)
 
     # Use the shared utility to generate actions (count=2 for single + pair actions)
-    return generate_search_actions(
+    actions = generate_search_actions(
         state=state,
         player=player,
         card=card,
@@ -421,6 +429,17 @@ def buddy_buddy_poffin_actions(state: GameState, card: CardInstance, player: Pla
         label_template="Buddy-Buddy Poffin (Search {names})",
         parameter_key='target_pokemon_ids'
     )
+
+    # Add "fail search" option (no targets selected)
+    actions.append(Action(
+        action_type=ActionType.PLAY_ITEM,
+        player_id=player.player_id,
+        card_id=card.id,
+        parameters={'target_pokemon_ids': []},
+        display_label="Buddy-Buddy Poffin (Fail Search)"
+    ))
+
+    return actions
 
 
 def nest_ball_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
@@ -436,16 +455,24 @@ def nest_ball_actions(state: GameState, card: CardInstance, player: PlayerState)
         player: Player who owns the card
 
     Returns:
-        List of Actions, one per searchable Basic Pokémon
+        List of Actions, one per searchable Basic Pokémon, plus fail search option
     """
     from ..utils import generate_search_actions
+
+    actions = []
+
+    # Check bench space
+    bench_space = player.board.max_bench_size - player.board.get_bench_count()
+
+    if bench_space <= 0 or player.deck.is_empty():
+        return actions
 
     # Define search criteria: Basic Pokémon
     def is_basic(card_def):
         return hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes
 
     # Use the shared utility to generate actions
-    return generate_search_actions(
+    actions = generate_search_actions(
         state=state,
         player=player,
         card=card,
@@ -454,6 +481,17 @@ def nest_ball_actions(state: GameState, card: CardInstance, player: PlayerState)
         label_template="Nest Ball (Search {name})",
         parameter_key='target_pokemon_id'
     )
+
+    # Add "fail search" option (no target selected)
+    actions.append(Action(
+        action_type=ActionType.PLAY_ITEM,
+        player_id=player.player_id,
+        card_id=card.id,
+        parameters={'target_pokemon_id': None},
+        display_label="Nest Ball (Fail Search)"
+    ))
+
+    return actions
 
 
 def iono_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:

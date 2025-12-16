@@ -107,8 +107,16 @@ def extract_standard_cards() -> None:
         'cards': all_cards
     }
 
+    # Convert to JSON string first so we can clean unicode characters
+    json_string = json.dumps(output_data, indent=2, ensure_ascii=True)
+
+    # Replace escaped Unicode sequences in the JSON string
+    json_string = json_string.replace('\\u00e9', 'e')  # é -> e
+    json_string = json_string.replace('\\u00d7', 'x')  # × -> x
+    json_string = json_string.replace('\\u00a0', ' ')  # non-breaking space -> space
+
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2)
+        f.write(json_string)
 
     # Step 5: Print summary
     print('\nExtraction complete!\n')

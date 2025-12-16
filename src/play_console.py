@@ -43,7 +43,8 @@ MAX_TURNS = 200   # Prevent infinite loops
 ENABLE_XRAY_LOGGING = True  # Enable X-Ray debug logging (shows all hidden info)
 
 # Default Deck Paths
-DEFAULT_DECK_1_PATH = "src/decks/chienpao_ex.txt"
+DEFAULT_DECK_1_PATH = "src/decks/charizard_ex.txt"
+# DEFAULT_DECK_1_PATH = "src/decks/chienpao_ex.txt"
 # DEFAULT_DECK_1_PATH = "src/decks/gholdengo.txt"
 # DEFAULT_DECK_1_PATH = "src/decks/gardevoir_jellicent.txt"
 # DEFAULT_DECK_1_PATH = "src/decks/dragapult_pidgeot.txt"
