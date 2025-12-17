@@ -165,15 +165,27 @@ SV2_LOGIC = {
     },
     
     "sv2-185": {  # Iono
-        "effect": iono_effect,
-        "generator": iono_actions,
+        "actions": {
+            "play": {
+                "generator": iono_actions,
+                "effect": iono_effect,
+            }
+        }
     },
     "sv2-254": {  # Iono
-        "effect": iono_effect,
-        "generator": iono_actions,
+        "actions": {
+            "play": {
+                "generator": iono_actions,
+                "effect": iono_effect,
+            }
+        }
     },
     "sv2-269": {  # Iono
-        "effect": iono_effect,
-        "generator": iono_actions,
+        "actions": {
+            "play": {
+                "generator": iono_actions,
+                "effect": iono_effect,
+            }
+        }
     },
 }

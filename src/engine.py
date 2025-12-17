@@ -1113,6 +1113,15 @@ class PokemonEngine:
                 target.attached_energy.append(energy)
                 player.energy_attached_this_turn = True
 
+                # 4 Pillars: Trigger "on_attach_energy" hooks
+                # Example: Cards that trigger when energy is attached
+                self._check_triggers(state, "on_attach_energy", {
+                    "energy_card": energy,
+                    "target_pokemon": target,
+                    "player_id": action.player_id,
+                    "source": "hand"
+                })
+
         return state
 
     def _apply_play_basic(self, state: GameState, action: Action) -> GameState:
@@ -1123,6 +1132,16 @@ class PokemonEngine:
         if card:
             card.turns_in_play = 0  # Reset for evolution sickness
             player.board.add_to_bench(card)
+
+            # Check for "on_play_pokemon" triggers (4 Pillars: Hooks)
+            # This allows cards like Flamigo's Insta-Flock to activate
+            triggered_actions = self._check_triggers(state, "on_play_pokemon", {
+                "card": card,
+                "player_id": action.player_id,
+                "source": "hand"
+            })
+            # TODO: Full Interrupt Stack implementation would process these actions
+            # For now, we just collect them - they can be processed by the caller
 
         return state
 
@@ -1251,24 +1270,15 @@ class PokemonEngine:
         Retreat Active Pokémon to Bench.
 
         Constitution Section 5: Removes status conditions and attack effects.
+        4 Pillars: Uses calculate_retreat_cost for LOCAL and GLOBAL modifiers.
         """
-        from cards.registry import create_card
-
         player = state.get_player(action.player_id)
 
         if player.board.active_spot:
             active = player.board.active_spot
 
-            # Get retreat cost from card definition
-            card_def = create_card(active.card_id)
-            retreat_cost = 0
-
-            if card_def and hasattr(card_def, 'get_retreat_cost'):
-                retreat_cost = card_def.get_retreat_cost(state, active)
-            elif card_def and hasattr(card_def, 'base_retreat_cost'):
-                retreat_cost = card_def.base_retreat_cost
-            elif card_def and hasattr(card_def, 'json_data') and 'retreatCost' in card_def.json_data:
-                retreat_cost = len(card_def.json_data['retreatCost'])
+            # Use calculate_retreat_cost which handles all modifiers (4 Pillars architecture)
+            retreat_cost = self.calculate_retreat_cost(state, active)
 
             # Discard energy equal to retreat cost
             if retreat_cost > 0:
@@ -1300,6 +1310,15 @@ class PokemonEngine:
             player.board.active_spot = new_active
 
             player.retreated_this_turn = True
+
+            # 4 Pillars: Check for "on_retreat" triggers
+            # Example: Cards that trigger when switching (e.g., some Stadium effects)
+            self._check_triggers(state, "on_retreat", {
+                "retreated_pokemon": active,
+                "new_active": new_active,
+                "player_id": action.player_id,
+                "retreat_cost_paid": retreat_cost
+            })
 
         return state
 
@@ -1452,9 +1471,18 @@ class PokemonEngine:
         - Switch active player
         - Draw card (atomic)
         - Enter Main Phase
+
+        4 Pillars Architecture: Triggers on_turn_end and on_turn_start hooks
         """
         # Step 1: Handle CLEANUP phase
         if state.current_phase == GamePhase.CLEANUP:
+            # 4 Pillars: Trigger "on_turn_end" for the player whose turn is ending
+            ending_player = state.get_active_player()
+            self._check_triggers(state, "on_turn_end", {
+                "player_id": ending_player.player_id,
+                "turn_count": state.turn_count
+            })
+
             # Apply status condition damage (between turns)
             state = self._apply_status_damage(state)
 
@@ -1492,6 +1520,13 @@ class PokemonEngine:
 
             # Automatically enter Main Phase
             state.current_phase = GamePhase.MAIN
+
+            # 4 Pillars: Trigger "on_turn_start" for the player whose turn is starting
+            starting_player = state.get_active_player()
+            self._check_triggers(state, "on_turn_start", {
+                "player_id": starting_player.player_id,
+                "turn_count": state.turn_count
+            })
 
         return state
 
@@ -1665,7 +1700,89 @@ class PokemonEngine:
         return state
 
     # ========================================================================
-    # 8. WIN CONDITION CHECKS
+    # 8. EVENT TRIGGERS (4 Pillars: Hooks)
+    # ========================================================================
+
+    def _check_triggers(
+        self,
+        state: GameState,
+        event_type: str,
+        context: dict
+    ) -> List[Action]:
+        """
+        Scan the board for cards with hooks that respond to the given event.
+
+        This is part of the 4 Pillars architecture - Hooks are event-triggered
+        functions that fire when specific game events occur.
+
+        Supported event types:
+        - "on_play_pokemon": When a Basic Pokémon is played from hand to bench
+        - "on_evolve": When a Pokémon evolves
+        - "on_knockout": When a Pokémon is knocked out
+        - "on_attach_energy": When energy is attached to a Pokémon
+        - "on_retreat": When a Pokémon retreats
+        - "on_turn_start": At the start of a turn
+        - "on_turn_end": At the end of a turn
+
+        Args:
+            state: Current game state
+            event_type: Type of event that occurred (e.g., "on_play_pokemon")
+            context: Event-specific context data (e.g., {"card": played_card, "player_id": 0})
+
+        Returns:
+            List of triggered Actions that need to be resolved.
+            (For now, just returns the list - full Interrupt Stack not yet implemented)
+
+        Example:
+            >>> # Flamigo's Insta-Flock triggers when played from hand
+            >>> triggered = self._check_triggers(state, "on_play_pokemon", {
+            >>>     "card": flamigo_card,
+            >>>     "player_id": 0,
+            >>>     "source": "hand"
+            >>> })
+        """
+        from cards.logic_registry import get_card_hooks
+
+        triggered_actions = []
+
+        # Scan both players' boards for cards with matching hooks
+        for player in state.players:
+            # Check active Pokémon
+            if player.board.active_spot:
+                hook = get_card_hooks(player.board.active_spot.card_id, event_type)
+                if hook:
+                    # Add context about which card triggered
+                    hook_context = {
+                        **context,
+                        "trigger_card": player.board.active_spot,
+                        "trigger_player_id": player.player_id
+                    }
+                    result = hook(state, player.board.active_spot, hook_context)
+                    if isinstance(result, list):
+                        triggered_actions.extend(result)
+                    elif isinstance(result, Action):
+                        triggered_actions.append(result)
+
+            # Check bench Pokémon
+            for bench_pokemon in player.board.bench:
+                if bench_pokemon:
+                    hook = get_card_hooks(bench_pokemon.card_id, event_type)
+                    if hook:
+                        hook_context = {
+                            **context,
+                            "trigger_card": bench_pokemon,
+                            "trigger_player_id": player.player_id
+                        }
+                        result = hook(state, bench_pokemon, hook_context)
+                        if isinstance(result, list):
+                            triggered_actions.extend(result)
+                        elif isinstance(result, Action):
+                            triggered_actions.append(result)
+
+        return triggered_actions
+
+    # ========================================================================
+    # 9. WIN CONDITION CHECKS
     # ========================================================================
 
     def _check_win_conditions(self, state: GameState) -> GameState:
@@ -1763,6 +1880,23 @@ class PokemonEngine:
 
         # Set metadata flag for history tracking (Fezandipiti ex)
         state.turn_metadata['pokemon_knocked_out'] = True
+
+        # 4 Pillars: Check for "on_knockout" triggers
+        # Example: Retaliate attack bonus, Avenge attack bonus, knockout-triggered abilities
+        triggered_actions = self._check_triggers(state, "on_knockout", {
+            "knocked_out": knocked_out,
+            "knocked_out_owner_id": knocked_out.owner_id,
+            "killer": killer,
+            "killer_owner_id": killer.owner_id if killer else None,
+            "winner_player_id": winner.player_id
+        })
+
+        # TODO: Add triggered actions to interrupt stack when implemented
+        # For now, store triggered actions in turn_metadata for cards that read knockout history
+        if triggered_actions:
+            if 'knockout_triggers' not in state.turn_metadata:
+                state.turn_metadata['knockout_triggers'] = []
+            state.turn_metadata['knockout_triggers'].extend(triggered_actions)
 
         return state
 
@@ -1931,12 +2065,13 @@ class PokemonEngine:
 
     def calculate_retreat_cost(self, state: GameState, pokemon: CardInstance) -> int:
         """
-        Calculate the dynamic retreat cost for a Pokémon, accounting for Tools and Effects.
+        Calculate the dynamic retreat cost for a Pokémon, accounting for Tools, Effects, and Abilities.
 
-        Category 2 Fix: Hardcoded Math (Retreat Cost)
-        - Base cost from card definition
-        - Apply modifiers from Tools (e.g., Float Stone, Air Balloon)
-        - Apply modifiers from Effects (e.g., Beach Court Stadium)
+        4 Pillars Architecture - Retreat Cost Calculation Order:
+        1. Start with base retreat cost from card definition
+        2. Apply active effects (Tools, legacy Stadium effects via effect system)
+        3. Apply LOCAL modifiers (card's own abilities, e.g., Charmander's Agile)
+        4. Apply GLOBAL modifiers (board-wide effects like Beach Court Stadium)
 
         Args:
             state: Current game state
@@ -1946,15 +2081,17 @@ class PokemonEngine:
             Final retreat cost (minimum 0)
         """
         from cards.registry import create_card
+        from cards.logic_registry import get_card_modifier, scan_global_modifiers
 
-        # Get base retreat cost from card definition
+        # Step 1: Get base retreat cost from card definition
         card_def = create_card(pokemon.card_id)
         if not card_def:
             return 0
 
         base_cost = card_def.base_retreat_cost if hasattr(card_def, 'base_retreat_cost') else 0
+        current_cost = base_cost
 
-        # Apply retreat cost modifiers from active effects
+        # Step 2: Apply retreat cost modifiers from active effects (Tools, legacy effects)
         modifier = 0
         for effect in state.active_effects:
             # Check if effect applies to this Pokémon
@@ -1965,8 +2102,25 @@ class PokemonEngine:
             if "retreat_cost_modifier" in effect.params:
                 modifier += effect.params["retreat_cost_modifier"]
 
+        current_cost = current_cost + modifier
+
+        # Step 3: Apply LOCAL modifiers (4 Pillars: card's own abilities)
+        # Example: Charmander's "Agile" - retreat cost = 0 if no Energy attached
+        card_modifier = get_card_modifier(pokemon.card_id, "retreat_cost")
+        if card_modifier:
+            # Modifier function signature: fn(state, card, current_cost) -> new_cost
+            current_cost = card_modifier(state, pokemon, current_cost)
+
+        # Step 4: Apply GLOBAL modifiers (4 Pillars: board-wide effects)
+        # Example: Beach Court Stadium - all Basic Pokémon retreat cost -1
+        # Scans Stadium, active Pokémon, and benched Pokémon for global effects
+        global_modifiers = scan_global_modifiers(state, "global_retreat_cost")
+        for source_card, modifier_fn in global_modifiers:
+            # Global modifier signature: fn(state, source_card, target_card, current_cost) -> new_cost
+            current_cost = modifier_fn(state, source_card, pokemon, current_cost)
+
         # Final cost (minimum 0)
-        final_cost = max(0, base_cost + modifier)
+        final_cost = max(0, current_cost)
         return final_cost
 
     def get_max_tool_capacity(self, pokemon: CardInstance) -> int:

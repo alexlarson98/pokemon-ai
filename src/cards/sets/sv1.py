@@ -14,11 +14,19 @@ from cards.library.trainers import (
 
 SV1_LOGIC = {
     "sv1-181": {  # Nest Ball
-        "effect": nest_ball_effect,
-        "generator": nest_ball_actions,
+        "actions": {
+            "play": {
+                "generator": nest_ball_actions,
+                "effect": nest_ball_effect,
+            }
+        }
     },
     "sv1-196": {  # Ultra Ball
-        "effect": ultra_ball_effect,
-        "generator": ultra_ball_actions,
+        "actions": {
+            "play": {
+                "generator": ultra_ball_actions,
+                "effect": ultra_ball_effect,
+            }
+        }
     },
 }

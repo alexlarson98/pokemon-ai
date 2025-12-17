@@ -12,11 +12,19 @@ from ..library.trainers import (
 
 ME1_LOGIC = {
     "me1-125": {  # Rare Candy
-        "effect": rare_candy_effect,
-        "generator": rare_candy_actions,
+        "actions": {
+            "play": {
+                "generator": rare_candy_actions,
+                "effect": rare_candy_effect,
+            }
+        }
     },
     "me1-131": {  # Ultra Ball
-        "effect": ultra_ball_effect,
-        "generator": ultra_ball_actions,
+        "actions": {
+            "play": {
+                "generator": ultra_ball_actions,
+                "effect": ultra_ball_effect,
+            }
+        }
     },
 }

@@ -366,6 +366,7 @@ def apply_status_condition(
     - A Pokémon can have multiple status conditions
     - Poison and Burn stack
     - Sleep, Paralysis, Confusion are mutually exclusive (replacing previous)
+    - Guards can block specific status conditions (e.g., Insomnia blocks Asleep)
 
     Args:
         state: Current game state
@@ -373,8 +374,18 @@ def apply_status_condition(
         condition: Status condition to apply
 
     Returns:
-        Modified GameState
+        Modified GameState (unchanged if guard blocks)
     """
+    # Check if the target has a guard that blocks this status condition
+    from cards.logic_registry import get_card_guard
+
+    guard = get_card_guard(target.card_id, "status_condition")
+    if guard:
+        # Guard returns True if the condition should be blocked
+        if guard(state, target, condition):
+            # Status condition is blocked - return state unchanged
+            return state
+
     # Special case: Asleep, Paralyzed, Confused are mutually exclusive
     exclusive_conditions = {
         StatusCondition.ASLEEP,
@@ -430,6 +441,120 @@ def clear_all_status_conditions(
     """
     target.status_conditions.clear()
     return state
+
+
+# ============================================================================
+# 3.5 PERMISSION CHECKS (4 Pillars: Global Guards)
+# ============================================================================
+
+def check_can_play_item(
+    state: GameState,
+    item_card: CardInstance,
+    player: PlayerState
+) -> bool:
+    """
+    Check if an Item card can be played.
+
+    This checks for GLOBAL guards that block Item cards (e.g., Item Lock effects).
+    Examples: Vileplume's "Allergy Panic", Seismitoad-EX's "Quaking Punch"
+
+    Args:
+        state: Current game state
+        item_card: The Item card attempting to be played
+        player: The player attempting to play the Item
+
+    Returns:
+        True if the Item can be played, False if blocked
+
+    Example:
+        >>> if not check_can_play_item(state, rare_candy, player):
+        >>>     return []  # Item play is blocked, no actions available
+    """
+    from cards.logic_registry import check_global_block
+
+    # Check for global Item lock effects
+    context = {
+        "item_card": item_card,
+        "player": player,
+        "player_id": player.player_id
+    }
+
+    # If any card on the board blocks Item play, return False
+    if check_global_block(state, "global_play_item", context):
+        return False
+
+    return True
+
+
+def check_can_play_supporter(
+    state: GameState,
+    supporter_card: CardInstance,
+    player: PlayerState
+) -> bool:
+    """
+    Check if a Supporter card can be played.
+
+    This checks for GLOBAL guards that block Supporter cards.
+    Examples: Some attack effects prevent Supporter use next turn.
+
+    Args:
+        state: Current game state
+        supporter_card: The Supporter card attempting to be played
+        player: The player attempting to play the Supporter
+
+    Returns:
+        True if the Supporter can be played, False if blocked
+    """
+    from cards.logic_registry import check_global_block
+
+    # Check for global Supporter lock effects
+    context = {
+        "supporter_card": supporter_card,
+        "player": player,
+        "player_id": player.player_id
+    }
+
+    if check_global_block(state, "global_play_supporter", context):
+        return False
+
+    return True
+
+
+def check_can_use_ability(
+    state: GameState,
+    pokemon: CardInstance,
+    ability_name: str,
+    player: PlayerState
+) -> bool:
+    """
+    Check if an Ability can be used.
+
+    This checks for GLOBAL guards that block Abilities.
+    Examples: Path to the Peak (blocks Rule Box abilities), Klefki lock
+
+    Args:
+        state: Current game state
+        pokemon: The Pokémon with the Ability
+        ability_name: Name of the Ability being used
+        player: The player attempting to use the Ability
+
+    Returns:
+        True if the Ability can be used, False if blocked
+    """
+    from cards.logic_registry import check_global_block
+
+    # Check for global Ability lock effects
+    context = {
+        "pokemon": pokemon,
+        "ability_name": ability_name,
+        "player": player,
+        "player_id": player.player_id
+    }
+
+    if check_global_block(state, "global_ability", context):
+        return False
+
+    return True
 
 
 # ============================================================================
@@ -849,6 +974,36 @@ def evolve_pokemon(
     else:
         bench_index = target_location[1]
         player.board.bench[bench_index] = evolution_card
+
+    # 4 Pillars: Trigger "on_evolve" hooks
+    # Example: Cards that respond to evolution events
+    from cards.logic_registry import get_card_hooks
+    for p in state.players:
+        # Check active
+        if p.board.active_spot:
+            hook = get_card_hooks(p.board.active_spot.card_id, "on_evolve")
+            if hook:
+                hook_context = {
+                    "evolved_pokemon": evolution_card,
+                    "previous_stage": target,
+                    "player_id": player_id,
+                    "trigger_card": p.board.active_spot,
+                    "trigger_player_id": p.player_id
+                }
+                hook(state, p.board.active_spot, hook_context)
+        # Check bench
+        for bench_pokemon in p.board.bench:
+            if bench_pokemon:
+                hook = get_card_hooks(bench_pokemon.card_id, "on_evolve")
+                if hook:
+                    hook_context = {
+                        "evolved_pokemon": evolution_card,
+                        "previous_stage": target,
+                        "player_id": player_id,
+                        "trigger_card": bench_pokemon,
+                        "trigger_player_id": p.player_id
+                    }
+                    hook(state, bench_pokemon, hook_context)
 
     return state
 
