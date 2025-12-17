@@ -8,6 +8,9 @@ Tests:
 - Belief placeholder resolution (resolve_search_target)
 - Perfect vs imperfect knowledge modes
 - Partial success in pair searches
+
+NOTE: Tests use action.parameters to verify search targets, NOT display_label strings.
+This ensures we're testing actual data, not just UI text.
 """
 
 import pytest
@@ -21,6 +24,98 @@ from cards.library.trainers import ultra_ball_actions, nest_ball_actions, buddy_
 from cards.utils import get_deck_search_candidates, resolve_search_target
 from cards.base import PokemonCard, Subtype
 from cards.registry import create_card
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def get_search_target_id(action):
+    """Extract search target ID from an action, handling different parameter names."""
+    if not action.parameters:
+        return None
+    # Ultra Ball uses 'search_target_id', Nest Ball uses 'target_pokemon_id'
+    return action.parameters.get('search_target_id') or action.parameters.get('target_pokemon_id')
+
+
+def get_actions_targeting_card_name(actions, card_name, deck_cards):
+    """
+    Get actions that target a specific Pokemon by name using parameter data.
+
+    Args:
+        actions: List of actions to filter
+        card_name: Name of the Pokemon to find (e.g., "Klefki")
+        deck_cards: List of card instances in the deck
+
+    Returns:
+        List of actions that target the given Pokemon name
+    """
+    # Build map of instance_id -> card_name for deck cards
+    deck_id_to_name = {}
+    for card in deck_cards:
+        card_def = create_card(card.card_id)
+        if card_def:
+            deck_id_to_name[card.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        target_id = get_search_target_id(action)
+        if target_id and target_id in deck_id_to_name:
+            if deck_id_to_name[target_id] == card_name:
+                matching_actions.append(action)
+        elif target_id and isinstance(target_id, str) and target_id.startswith('belief:'):
+            # Belief placeholder format: 'belief:CardName'
+            belief_name = target_id.split(':', 1)[1]
+            if belief_name == card_name:
+                matching_actions.append(action)
+
+    return matching_actions
+
+
+def get_poffin_target_ids(action):
+    """Get target Pokemon IDs from Buddy-Buddy Poffin action."""
+    if not action.parameters:
+        return []
+    return action.parameters.get('target_pokemon_ids', [])
+
+
+def get_poffin_actions_targeting_card_names(actions, name1, name2, deck_cards):
+    """
+    Get Poffin pair actions that target two specific Pokemon by name.
+
+    Args:
+        actions: List of actions to filter
+        name1: First Pokemon name to find
+        name2: Second Pokemon name to find
+        deck_cards: List of card instances in the deck
+
+    Returns:
+        List of actions targeting a pair containing both Pokemon names
+    """
+    # Build map of instance_id -> card_name for deck cards
+    deck_id_to_name = {}
+    for card in deck_cards:
+        card_def = create_card(card.card_id)
+        if card_def:
+            deck_id_to_name[card.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        target_ids = get_poffin_target_ids(action)
+        target_names = []
+
+        for tid in target_ids:
+            if tid in deck_id_to_name:
+                target_names.append(deck_id_to_name[tid])
+            elif isinstance(tid, str) and tid.startswith('belief:'):
+                belief_name = tid.split(':', 1)[1]
+                target_names.append(belief_name)
+
+        # Check if both names are in the target set
+        if name1 in target_names and name2 in target_names:
+            matching_actions.append(action)
+
+    return matching_actions
 
 
 @pytest.fixture
@@ -159,7 +254,8 @@ class TestBeliefPlaceholderGeneration:
         actions = ultra_ball_actions(state, ultra_ball, player)
 
         # Should create actions for both Pidgey (in deck) and Klefki (in prizes, via belief)
-        klefki_actions = [a for a in actions if 'Klefki' in a.display_label]
+        # Use parameter data to verify belief placeholder targeting Klefki
+        klefki_actions = get_actions_targeting_card_name(actions, "Klefki", player.deck.cards)
         assert len(klefki_actions) > 0, "Should create belief-based action for Klefki"
 
     def test_buddy_buddy_poffin_creates_pair_with_belief(self, engine, game_state_with_prizes):
@@ -176,7 +272,8 @@ class TestBeliefPlaceholderGeneration:
         actions = buddy_buddy_poffin_actions(state, poffin, player)
 
         # Should create pair actions including Klefki + Pidgey
-        pair_actions = [a for a in actions if 'Klefki' in a.display_label and 'Pidgey' in a.display_label]
+        # Use parameter data to verify pair targeting both Pokemon
+        pair_actions = get_poffin_actions_targeting_card_names(actions, "Klefki", "Pidgey", player.deck.cards)
         assert len(pair_actions) > 0, "Should create pair action with belief placeholder (Klefki + Pidgey)"
 
 
@@ -278,7 +375,8 @@ class TestPerfectVsImperfectKnowledge:
         actions = ultra_ball_actions(state, ultra_ball, player)
 
         # Should NOT create action for Klefki (player knows it's not in deck)
-        klefki_actions = [a for a in actions if 'Klefki' in a.display_label]
+        # Use parameter data to verify no belief placeholder targeting Klefki
+        klefki_actions = get_actions_targeting_card_name(actions, "Klefki", player.deck.cards)
         assert len(klefki_actions) == 0, "Should not create belief action with perfect knowledge"
 
 

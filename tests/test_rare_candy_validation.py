@@ -7,6 +7,9 @@ Tests:
 - Rare Candy only works with Stage 2 cards
 - Rare Candy respects evolution sickness
 - Rare Candy with multiple evolution lines
+
+NOTE: Tests use action.parameters to verify evolution targets, NOT display_label strings.
+This ensures we're testing actual data, not just UI text.
 """
 
 import pytest
@@ -19,6 +22,134 @@ from cards.factory import create_card_instance
 from cards.library.trainers import rare_candy_actions
 from cards.utils import _check_evolution_chain
 from cards.registry import create_card
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def get_evolution_card_id(action):
+    """Extract the evolution card ID from a Rare Candy action."""
+    if not action.parameters:
+        return None
+    return action.parameters.get('evolution_card_id')
+
+
+def get_target_pokemon_id(action):
+    """Extract the target Pokemon ID (Basic to evolve) from a Rare Candy action."""
+    if not action.parameters:
+        return None
+    return action.parameters.get('target_pokemon_id')
+
+
+def get_actions_evolving_to(actions, evolution_name, hand_cards):
+    """
+    Get actions that evolve into a specific Pokemon by name using parameter data.
+
+    Args:
+        actions: List of actions to filter
+        evolution_name: Name of the evolution Pokemon (e.g., "Pidgeot")
+        hand_cards: List of card instances in hand
+
+    Returns:
+        List of actions that evolve into the given Pokemon name
+    """
+    # Build map of instance_id -> card_name for hand cards
+    hand_id_to_name = {}
+    for card in hand_cards:
+        card_def = create_card(card.card_id)
+        if card_def:
+            hand_id_to_name[card.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        evo_id = get_evolution_card_id(action)
+        if evo_id and evo_id in hand_id_to_name:
+            if hand_id_to_name[evo_id] == evolution_name:
+                matching_actions.append(action)
+
+    return matching_actions
+
+
+def get_actions_evolving_target(actions, target_name, board_pokemon):
+    """
+    Get actions that evolve a specific target Pokemon by name using parameter data.
+
+    Args:
+        actions: List of actions to filter
+        target_name: Name of the target Pokemon (e.g., "Pidgey")
+        board_pokemon: List of Pokemon on the board (active + bench)
+
+    Returns:
+        List of actions evolving the given target Pokemon name
+    """
+    # Build map of instance_id -> card_name for board pokemon
+    board_id_to_name = {}
+    for pokemon in board_pokemon:
+        if pokemon:
+            card_def = create_card(pokemon.card_id)
+            if card_def:
+                board_id_to_name[pokemon.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        target_id = get_target_pokemon_id(action)
+        if target_id and target_id in board_id_to_name:
+            if board_id_to_name[target_id] == target_name:
+                matching_actions.append(action)
+
+    return matching_actions
+
+
+def get_actions_evolving_pair(actions, target_name, evolution_name, board_pokemon, hand_cards):
+    """
+    Get actions that evolve a specific target into a specific evolution.
+
+    Args:
+        actions: List of actions to filter
+        target_name: Name of the target Pokemon (e.g., "Pidgey")
+        evolution_name: Name of the evolution Pokemon (e.g., "Pidgeot")
+        board_pokemon: List of Pokemon on the board
+        hand_cards: List of card instances in hand
+
+    Returns:
+        List of actions matching both target and evolution
+    """
+    # Build maps
+    board_id_to_name = {}
+    for pokemon in board_pokemon:
+        if pokemon:
+            card_def = create_card(pokemon.card_id)
+            if card_def:
+                board_id_to_name[pokemon.id] = card_def.name
+
+    hand_id_to_name = {}
+    for card in hand_cards:
+        card_def = create_card(card.card_id)
+        if card_def:
+            hand_id_to_name[card.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        target_id = get_target_pokemon_id(action)
+        evo_id = get_evolution_card_id(action)
+
+        target_matches = target_id and board_id_to_name.get(target_id) == target_name
+        evo_matches = evo_id and hand_id_to_name.get(evo_id) == evolution_name
+
+        if target_matches and evo_matches:
+            matching_actions.append(action)
+
+    return matching_actions
+
+
+def get_all_board_pokemon(player):
+    """Get all Pokemon on a player's board (active + bench)."""
+    pokemon = []
+    if player.board.active_spot:
+        pokemon.append(player.board.active_spot)
+    pokemon.extend(player.board.bench)
+    return pokemon
 
 
 @pytest.fixture
@@ -58,7 +189,7 @@ class TestEvolutionChainValidation:
         player = state.players[0]
 
         # Add Rare Candy to hand
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Add Pidgeot (Stage 2) to hand
@@ -69,7 +200,8 @@ class TestEvolutionChainValidation:
         actions = rare_candy_actions(state, rare_candy, player)
 
         # Should create action for Pidgey -> Pidgeot
-        pidgeot_actions = [a for a in actions if 'Pidgeot' in a.display_label]
+        # Use parameter data to verify evolution target
+        pidgeot_actions = get_actions_evolving_to(actions, "Pidgeot", player.hand.cards)
         assert len(pidgeot_actions) == 1, "Should create Rare Candy action for Pidgeot"
 
     def test_invalid_evolution_chain_pidgey_to_alakazam(self, game_state_with_basic):
@@ -78,7 +210,7 @@ class TestEvolutionChainValidation:
         player = state.players[0]
 
         # Add Rare Candy to hand
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Add Alakazam (Stage 2, different evolution line) to hand
@@ -89,7 +221,8 @@ class TestEvolutionChainValidation:
         actions = rare_candy_actions(state, rare_candy, player)
 
         # Should NOT create action for Pidgey -> Alakazam
-        alakazam_actions = [a for a in actions if 'Alakazam' in a.display_label]
+        # Use parameter data to verify no Alakazam evolution
+        alakazam_actions = get_actions_evolving_to(actions, "Alakazam", player.hand.cards)
         assert len(alakazam_actions) == 0, "Should not allow Pidgey to evolve into Alakazam"
 
     def test_check_evolution_chain_helper(self):
@@ -115,7 +248,7 @@ class TestRareCandyRestrictions:
         state = game_state_with_basic
         player = state.players[0]
 
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Add Pidgeotto (Stage 1) to hand - should NOT work with Rare Candy
@@ -125,7 +258,8 @@ class TestRareCandyRestrictions:
         actions = rare_candy_actions(state, rare_candy, player)
 
         # Should not create actions for Stage 1 Pokemon
-        pidgeotto_actions = [a for a in actions if 'Pidgeotto' in a.display_label]
+        # Use parameter data to verify no Pidgeotto evolution
+        pidgeotto_actions = get_actions_evolving_to(actions, "Pidgeotto", player.hand.cards)
         assert len(pidgeotto_actions) == 0, "Rare Candy should not work with Stage 1 Pokemon"
 
     def test_rare_candy_respects_evolution_sickness(self):
@@ -150,7 +284,7 @@ class TestRareCandyRestrictions:
 
         player = state.players[0]
 
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         pidgeot = create_card_instance("sv3pt5-18", owner_id=0)
@@ -166,7 +300,7 @@ class TestRareCandyRestrictions:
         state = game_state_with_basic
         player = state.players[0]
 
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Don't add any Stage 2 Pokemon to hand
@@ -207,7 +341,7 @@ class TestRareCandyMultipleLines:
 
         player = state.players[0]
 
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Add both Pidgeot (for Pidgey) and Charizard (for Charmander)
@@ -222,8 +356,10 @@ class TestRareCandyMultipleLines:
         actions = rare_candy_actions(state, rare_candy, player)
 
         # Should create actions for both valid evolutions
-        pidgeot_actions = [a for a in actions if 'Pidgeot' in a.display_label and 'Pidgey' in a.display_label]
-        charizard_actions = [a for a in actions if 'Charizard' in a.display_label and 'Charmander' in a.display_label]
+        # Use parameter data to verify evolution pairs
+        board_pokemon = get_all_board_pokemon(player)
+        pidgeot_actions = get_actions_evolving_pair(actions, "Pidgey", "Pidgeot", board_pokemon, player.hand.cards)
+        charizard_actions = get_actions_evolving_pair(actions, "Charmander", "Charizard ex", board_pokemon, player.hand.cards)
 
         assert len(pidgeot_actions) >= 1, "Should allow Pidgey -> Pidgeot"
         assert len(charizard_actions) >= 1, "Should allow Charmander -> Charizard"
@@ -254,7 +390,7 @@ class TestRareCandyEdgeCases:
 
         player = state.players[0]
 
-        rare_candy = create_card_instance("sv3pt5-159", owner_id=0)
+        rare_candy = create_card_instance("sv1-256", owner_id=0)
         player.hand.add_card(rare_candy)
 
         # Pidgeot evolves from Pidgeotto, but Rare Candy requires Basic

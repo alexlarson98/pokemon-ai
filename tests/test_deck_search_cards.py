@@ -8,6 +8,9 @@ Tests:
 - Fail search options
 - Search with belief placeholders
 - Perfect knowledge integration
+
+NOTE: Tests use action.parameters to verify search targets, NOT display_label strings.
+This ensures we're testing actual data, not just UI text.
 """
 
 import pytest
@@ -24,6 +27,68 @@ from cards.library.trainers import (
 )
 from cards.base import Subtype
 from cards.registry import create_card
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def get_search_target_id(action):
+    """Extract search target ID from an action, handling different parameter names."""
+    if not action.parameters:
+        return None
+    # Ultra Ball uses 'search_target_id', Nest Ball uses 'target_pokemon_id'
+    return action.parameters.get('search_target_id') or action.parameters.get('target_pokemon_id')
+
+
+def get_actions_targeting_card_name(actions, card_name, deck_cards):
+    """
+    Get actions that target a specific Pokemon by name using parameter data.
+
+    Args:
+        actions: List of actions to filter
+        card_name: Name of the Pokemon to find (e.g., "Pidgey")
+        deck_cards: List of card instances in the deck
+
+    Returns:
+        List of actions that target the given Pokemon name
+    """
+    # Build map of instance_id -> card_name for deck cards
+    deck_id_to_name = {}
+    for card in deck_cards:
+        card_def = create_card(card.card_id)
+        if card_def:
+            deck_id_to_name[card.id] = card_def.name
+
+    matching_actions = []
+    for action in actions:
+        target_id = get_search_target_id(action)
+        if target_id and target_id in deck_id_to_name:
+            if deck_id_to_name[target_id] == card_name:
+                matching_actions.append(action)
+        elif target_id and target_id.startswith('belief:'):
+            # Belief placeholder format: 'belief:CardName'
+            belief_name = target_id.split(':', 1)[1]
+            if belief_name == card_name:
+                matching_actions.append(action)
+
+    return matching_actions
+
+
+def has_fail_search_action(actions):
+    """Check if there's a fail search action (target_id is None)."""
+    for action in actions:
+        target_id = get_search_target_id(action)
+        if target_id is None:
+            return True
+    return False
+
+
+def get_poffin_target_ids(action):
+    """Get target Pokemon IDs from Buddy-Buddy Poffin action."""
+    if not action.parameters:
+        return []
+    return action.parameters.get('target_pokemon_ids', [])
 
 
 @pytest.fixture
@@ -91,8 +156,9 @@ class TestUltraBall:
         # Should generate actions for Pidgey and Charmander
         assert len(actions) > 0, "Should generate Ultra Ball actions"
 
-        pidgey_actions = [a for a in actions if 'Pidgey' in a.display_label]
-        charmander_actions = [a for a in actions if 'Charmander' in a.display_label]
+        # Use parameter data to verify search targets, not display_label strings
+        pidgey_actions = get_actions_targeting_card_name(actions, "Pidgey", player.deck.cards)
+        charmander_actions = get_actions_targeting_card_name(actions, "Charmander", player.deck.cards)
 
         assert len(pidgey_actions) > 0, "Should have action to search Pidgey"
         assert len(charmander_actions) > 0, "Should have action to search Charmander"
@@ -111,9 +177,8 @@ class TestUltraBall:
 
         actions = ultra_ball_actions(state, ultra_ball, player)
 
-        # Should have fail search option
-        fail_actions = [a for a in actions if 'Fail Search' in a.display_label]
-        assert len(fail_actions) > 0, "Should have fail search option"
+        # Should have fail search option (target_id is None)
+        assert has_fail_search_action(actions), "Should have fail search option"
 
     def test_ultra_ball_effect_discards_cards(self, engine, basic_game_state):
         """Ultra Ball effect should discard 2 cards."""
@@ -168,7 +233,8 @@ class TestNestBall:
         # Should generate actions for Basic Pokemon
         assert len(actions) > 0, "Should generate Nest Ball actions"
 
-        pidgey_actions = [a for a in actions if 'Pidgey' in a.display_label]
+        # Use parameter data to verify search targets
+        pidgey_actions = get_actions_targeting_card_name(actions, "Pidgey", player.deck.cards)
         assert len(pidgey_actions) > 0, "Should have action to search Basic Pokemon"
 
     def test_nest_ball_adds_to_bench(self, engine, basic_game_state):
@@ -255,9 +321,19 @@ class TestBuddyBuddyPoffin:
         # Should generate pair actions
         assert len(actions) > 0, "Should generate Buddy-Buddy Poffin actions"
 
-        # Should have pairs with Pidgey and Charmander
-        pair_actions = [a for a in actions if 'Pidgey' in a.display_label or 'Charmander' in a.display_label]
-        assert len(pair_actions) > 0, "Should have pair actions"
+        # Build deck map for verification
+        deck_id_to_name = {c.id: create_card(c.card_id).name for c in player.deck.cards}
+
+        # Verify at least one action targets Pidgey and/or Charmander using parameter data
+        found_valid_pair = False
+        for action in actions:
+            target_ids = get_poffin_target_ids(action)
+            target_names = [deck_id_to_name.get(tid) for tid in target_ids if tid in deck_id_to_name]
+            if "Pidgey" in target_names or "Charmander" in target_names:
+                found_valid_pair = True
+                break
+
+        assert found_valid_pair, "Should have pair actions targeting Pidgey or Charmander"
 
     def test_poffin_adds_up_to_two_pokemon(self, engine):
         """Buddy-Buddy Poffin should add up to 2 Pokemon to bench."""
@@ -337,7 +413,8 @@ class TestSearchCardsWithBeliefSystem:
         actions = ultra_ball_actions(state, ultra_ball, player)
 
         # Should create action for Klefki (via belief placeholder)
-        klefki_actions = [a for a in actions if 'Klefki' in a.display_label]
+        # Use parameter data to find belief placeholder targeting Klefki
+        klefki_actions = get_actions_targeting_card_name(actions, "Klefki", player.deck.cards)
         assert len(klefki_actions) > 0, "Should create belief-based action for Klefki"
 
 
