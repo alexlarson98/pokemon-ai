@@ -11,6 +11,62 @@ from models import GameState, PlayerState, CardInstance, Action, ActionType
 from cards.registry import create_card
 from cards.factory import get_card_definition
 
+# Cache for evolution chain lookups
+_evolution_chain_cache = {}
+
+
+def _check_evolution_chain(intermediate_name: str, base_name: str) -> bool:
+    """
+    Check if a valid evolution chain exists: base_name -> intermediate_name -> (Stage 2).
+
+    Used by Rare Candy to validate that a Stage 2 can evolve from a Basic
+    by checking if the intermediate Stage 1 exists in the card database.
+
+    Args:
+        intermediate_name: Name of the intermediate evolution (Stage 1)
+        base_name: Name of the base Pokemon (Basic)
+
+    Returns:
+        True if intermediate_name is a valid Stage 1 that evolves from base_name
+
+    Example:
+        >>> _check_evolution_chain('Pidgeotto', 'Pidgey')  # True
+        >>> _check_evolution_chain('Charmeleon', 'Pidgey')  # False
+    """
+    # Check cache first
+    cache_key = (intermediate_name, base_name)
+    if cache_key in _evolution_chain_cache:
+        return _evolution_chain_cache[cache_key]
+
+    # Load card data to check evolution chain
+    import json
+    import os
+
+    # Get the correct path to standard_cards.json
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    cards_json_path = os.path.join(current_dir, '..', '..', 'data', 'standard_cards.json')
+
+    try:
+        with open(cards_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            all_cards = data.get('cards', [])
+
+        # Check if there exists a card with name=intermediate_name that evolves from base_name
+        for card_data in all_cards:
+            if (card_data.get('name') == intermediate_name and
+                card_data.get('evolvesFrom') == base_name):
+                # Found valid intermediate evolution
+                _evolution_chain_cache[cache_key] = True
+                return True
+
+        # No valid intermediate found
+        _evolution_chain_cache[cache_key] = False
+        return False
+
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        # If we can't load the file, be conservative and return False
+        return False
+
 
 def resolve_search_target(
     player: PlayerState,
@@ -534,10 +590,37 @@ def generate_evolution_actions(
 
         # Find evolution cards that can evolve from this target
         for evolution_card, evolution_def in evolution_cards:
-            # For now, create action for all evolution cards
-            # (Engine will validate evolution chain)
-            # TODO: Proper evolution chain validation
-            if hasattr(evolution_def, 'evolves_from'):
+            # Validate evolution chain
+            if not hasattr(evolution_def, 'evolves_from') or not evolution_def.evolves_from:
+                continue
+
+            # Check if this evolution is valid for the target
+            is_valid_evolution = False
+
+            if skip_stage:
+                # Rare Candy: Check if the Stage 2's intermediate stage can evolve from the target
+                # Example: Pidgeot (Stage 2) evolves from Pidgeotto (Stage 1)
+                #          We need to check if Pidgeotto can evolve from Pidgey (the target Basic)
+
+                # The Stage 2's evolves_from field points to the Stage 1
+                # We need to verify that Stage 1 can evolve from the target Basic
+
+                # Since we're skipping a stage, evolution_def.evolves_from should NOT equal target_def.name
+                # (if it did, it would be a direct evolution, not skipping)
+                if evolution_def.evolves_from != target_def.name:
+                    # Now check if there exists a card with name=evolution_def.evolves_from
+                    # that evolves from target_def.name
+
+                    # Check the evolution chain by looking for intermediate Stage 1
+                    intermediate_name = evolution_def.evolves_from
+
+                    # Use a helper function to check if the intermediate exists
+                    is_valid_evolution = _check_evolution_chain(intermediate_name, target_def.name)
+            else:
+                # Normal evolution: Direct check
+                is_valid_evolution = (evolution_def.evolves_from == target_def.name)
+
+            if is_valid_evolution:
                 label = label_template.format(
                     target=target_def.name,
                     evolution=evolution_def.name

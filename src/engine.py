@@ -1283,11 +1283,20 @@ class PokemonEngine:
             active.status_conditions.clear()  # Remove all status conditions
             active.attack_effects.clear()  # Remove attack effects
 
-            # Move to bench
-            player.board.add_to_bench(active)
-
-            # Promote new Active
+            # CRITICAL: Swap active and bench Pokemon in correct order
+            # 1. Remove target from bench first (frees up a bench slot)
             new_active = player.board.remove_from_bench(action.target_id)
+
+            # 2. Clear active spot
+            player.board.active_spot = None
+
+            # 3. Move old active to bench (now there's room)
+            success = player.board.add_to_bench(active)
+            if not success:
+                # This should never happen since we just freed a bench slot
+                raise ValueError(f"Failed to move retreating Pokemon to bench (bench full)")
+
+            # 4. Set new active
             player.board.active_spot = new_active
 
             player.retreated_this_turn = True
