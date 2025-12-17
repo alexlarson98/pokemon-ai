@@ -322,3 +322,240 @@ def assert_action_count(actions: List, expected_count: int):
     """Assert the exact number of legal actions."""
     assert len(actions) == expected_count, \
         f"Expected {expected_count} actions, but got {len(actions)}: {actions}"
+
+
+# ============================================================================
+# ADDITIONAL FIXTURES FOR COMPREHENSIVE TESTS
+# ============================================================================
+
+@pytest.fixture
+def basic_game_state():
+    """
+    Create a basic game state with two players, both with active Pokemon.
+
+    Setup:
+    - Turn count: 2 (past turn 1 restrictions)
+    - Active player: Player 0
+    - Phase: MAIN
+    - Both players have active Pokemon (Pidgey)
+    - No benched Pokemon
+    - Empty hands
+
+    Usage:
+        def test_something(basic_game_state):
+            player = basic_game_state.players[0]
+            active = player.board.active_spot
+    """
+    player0 = PlayerState(player_id=0, name='Player 0')
+    player1 = PlayerState(player_id=1, name='Player 1')
+
+    # Give both players an active Pokemon (Pidgey)
+    player0.board.active_spot = create_card_instance("sv3pt5-16", owner_id=0)
+    player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+    return GameState(
+        players=[player0, player1],
+        turn_count=2,
+        active_player_index=0,
+        current_phase=GamePhase.MAIN,
+        starting_player_id=0
+    )
+
+
+@pytest.fixture
+def game_state_with_bench():
+    """
+    Create a game state with benched Pokemon for both players.
+
+    Setup:
+    - Same as basic_game_state
+    - Player 0: Active Pidgey + 2 benched Pokemon
+    - Player 1: Active Pidgey + 1 benched Pokemon
+    """
+    player0 = PlayerState(player_id=0, name='Player 0')
+    player1 = PlayerState(player_id=1, name='Player 1')
+
+    # Active Pokemon
+    player0.board.active_spot = create_card_instance("sv3pt5-16", owner_id=0)
+    player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+    # Add bench Pokemon
+    player0.board.add_to_bench(create_card_instance("sv2-81", owner_id=0))
+    player0.board.add_to_bench(create_card_instance("sv4pt5-7", owner_id=0))
+
+    player1.board.add_to_bench(create_card_instance("sv2-81", owner_id=1))
+
+    return GameState(
+        players=[player0, player1],
+        turn_count=2,
+        active_player_index=0,
+        current_phase=GamePhase.MAIN,
+        starting_player_id=0
+    )
+
+
+@pytest.fixture
+def full_bench_game_state():
+    """
+    Create a game state with full benches (5 Pokemon each).
+
+    Setup:
+    - Same as basic_game_state
+    - Both players have full benches (5 Pokemon)
+    - Useful for testing retreat with full bench
+    """
+    player0 = PlayerState(player_id=0, name='Player 0')
+    player1 = PlayerState(player_id=1, name='Player 1')
+
+    # Active Pokemon
+    player0.board.active_spot = create_card_instance("sv3pt5-16", owner_id=0)
+    player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+    # Fill benches to maximum (5 Pokemon)
+    for _ in range(5):
+        player0.board.add_to_bench(create_card_instance("sv2-81", owner_id=0))
+        player1.board.add_to_bench(create_card_instance("sv2-81", owner_id=1))
+
+    return GameState(
+        players=[player0, player1],
+        turn_count=2,
+        active_player_index=0,
+        current_phase=GamePhase.MAIN,
+        starting_player_id=0
+    )
+
+
+@pytest.fixture
+def turn_1_game_state():
+    """
+    Create a game state on turn 1 (for testing turn 1 restrictions).
+
+    Setup:
+    - Turn count: 1
+    - Active player: Player 0 (went first)
+    - Phase: MAIN
+    - Both players have active Pokemon
+    """
+    player0 = PlayerState(player_id=0, name='Player 0')
+    player1 = PlayerState(player_id=1, name='Player 1')
+
+    player0.board.active_spot = create_card_instance("sv3pt5-16", owner_id=0)
+    player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+    return GameState(
+        players=[player0, player1],
+        turn_count=1,  # Turn 1
+        active_player_index=0,
+        current_phase=GamePhase.MAIN,
+        starting_player_id=0  # Player 0 went first
+    )
+
+
+@pytest.fixture
+def card_factory():
+    """
+    Provide a factory function for creating card instances.
+
+    Usage:
+        def test_something(card_factory):
+            pidgey = card_factory("sv3pt5-16", owner_id=0)
+            energy = card_factory("base1-98", owner_id=0)
+    """
+    def _create_card(card_id: str, owner_id: int = 0):
+        """Create a card instance with the given card ID and owner."""
+        return create_card_instance(card_id, owner_id=owner_id)
+
+    return _create_card
+
+
+@pytest.fixture
+def energy_factory(card_factory):
+    """
+    Provide a factory function for creating energy cards.
+
+    Usage:
+        def test_something(energy_factory):
+            fire_energy = energy_factory('fire', owner_id=0)
+            water_energy = energy_factory('water', owner_id=0)
+    """
+    energy_mapping = {
+        'fire': 'base1-98',      # Fire Energy
+        'water': 'base1-102',    # Water Energy
+        'grass': 'base1-99',     # Grass Energy
+        'lightning': 'base1-100', # Lightning Energy
+        'psychic': 'base1-101',  # Psychic Energy
+        'fighting': 'base1-97',  # Fighting Energy
+        'darkness': 'base1-104', # Darkness Energy
+        'metal': 'base1-103',    # Metal Energy
+    }
+
+    def _create_energy(energy_type: str, owner_id: int = 0):
+        """
+        Create an energy card of the specified type.
+
+        Args:
+            energy_type: Type of energy ('fire', 'water', 'grass', etc.)
+            owner_id: Owner player ID (0 or 1)
+
+        Returns:
+            CardInstance for the energy card
+        """
+        card_id = energy_mapping.get(energy_type.lower())
+        if not card_id:
+            raise ValueError(f"Unknown energy type: {energy_type}. Valid types: {list(energy_mapping.keys())}")
+        return card_factory(card_id, owner_id=owner_id)
+
+    return _create_energy
+
+
+# ============================================================================
+# COMMON CARD IDS (for reference and easy import)
+# ============================================================================
+
+# Basic Pokemon
+PIDGEY = "sv3pt5-16"          # 60 HP, Colorless, retreat cost 1
+CHARMANDER = "sv4pt5-7"       # 60 HP, Fire
+WATTREL = "sv2-81"            # 50 HP, Lightning
+HOOTHOOT = "sv3pt5-162"       # 60 HP, Colorless
+
+# Stage 1 Pokemon
+PIDGEOTTO = "sv3pt5-17"       # Evolves from Pidgey
+CHARMELEON = "sv4pt5-8"       # Evolves from Charmander
+
+# Stage 2 Pokemon
+PIDGEOT = "sv3pt5-18"         # Evolves from Pidgeotto
+CHARIZARD_EX = "sv4pt5-9"     # Evolves from Charmeleon
+
+# Pokemon ex
+PIDGEOT_EX = "sv3pt5-164"     # Basic Pokemon ex
+
+# Trainer Cards
+ULTRA_BALL = "sv3pt5-146"     # Search deck for Pokemon
+NEST_BALL = "sv3pt5-145"      # Search deck for Basic Pokemon
+BUDDY_BUDDY_POFFIN = "sv4pt5-139"  # Search for Pokemon with HP <= 70
+RARE_CANDY = "sv3pt5-171"     # Evolve Basic to Stage 2
+
+# Energy Cards
+FIRE_ENERGY = "base1-98"
+WATER_ENERGY = "base1-102"
+GRASS_ENERGY = "base1-99"
+LIGHTNING_ENERGY = "base1-100"
+
+
+# ============================================================================
+# PYTEST CONFIGURATION
+# ============================================================================
+
+def pytest_configure(config):
+    """
+    Configure pytest markers and other settings.
+    """
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
+    config.addinivalue_line(
+        "markers", "integration: marks tests as integration tests"
+    )
+    config.addinivalue_line(
+        "markers", "unit: marks tests as unit tests"
+    )
