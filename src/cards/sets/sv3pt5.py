@@ -128,6 +128,167 @@ def charmander_steady_firebreathing_effect(state: GameState, card: CardInstance,
 
 
 # ============================================================================
+# CHARMELEON - VERSION 2: COMBUSTION & FIRE BLAST (sv3pt5-5, sv3pt5-169)
+# ============================================================================
+
+def charmeleon_combustion_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Charmeleon's "Combustion" attack.
+
+    Attack: Combustion [F]
+    20 damage. No additional effects.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Combustion",
+        display_label="Combustion - 20 Dmg"
+    )]
+
+
+def charmeleon_combustion_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Charmeleon's "Combustion" attack effect.
+
+    Deals 20 damage to opponent's Active Pokémon.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 20 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=20,
+            attack_name="Combustion"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+def charmeleon_fire_blast_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Charmeleon's "Fire Blast" attack.
+
+    Attack: Fire Blast [FFF]
+    90 damage. Discard an Energy from this Pokemon.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with attack actions for each energy that can be discarded
+    """
+    actions = []
+
+    # Get attached energy cards
+    attached_energy = card.attached_energy
+
+    if not attached_energy:
+        # No energy to discard - attack cannot be used
+        # (This shouldn't happen since attack costs FFF)
+        return []
+
+    # Generate one action per unique energy type that can be discarded
+    # For simplicity, we'll just pick the first energy
+    # In a full implementation, you might want to let the player choose
+    actions.append(Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Fire Blast",
+        parameters={'discard_energy_id': attached_energy[0].id},
+        display_label="Fire Blast - 90 Dmg (Discard Energy)"
+    ))
+
+    return actions
+
+
+def charmeleon_fire_blast_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Charmeleon's "Fire Blast" attack effect.
+
+    Deals 90 damage to opponent's Active Pokémon and discards an Energy from self.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        action: Attack action with discard_energy_id parameter
+
+    Returns:
+        Modified GameState
+    """
+    player = state.get_player(action.player_id)
+    opponent = state.get_opponent()
+
+    # Deal 90 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=90,
+            attack_name="Fire Blast"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    # Discard an Energy from this Pokemon
+    discard_energy_id = action.parameters.get('discard_energy_id') if action.parameters else None
+
+    if discard_energy_id:
+        # Find and remove the specific energy
+        energy_to_discard = None
+        for i, energy in enumerate(card.attached_energy):
+            if energy.id == discard_energy_id:
+                energy_to_discard = card.attached_energy.pop(i)
+                break
+
+        if energy_to_discard:
+            player.discard.add_card(energy_to_discard)
+    elif card.attached_energy:
+        # Fallback: discard first attached energy
+        energy_to_discard = card.attached_energy.pop(0)
+        player.discard.add_card(energy_to_discard)
+
+    return state
+
+
+# ============================================================================
 # PIDGEY - VERSION 2: CALL FOR FAMILY & TACKLE (sv3pt5-16)
 # ============================================================================
 
@@ -377,6 +538,28 @@ SV3PT5_LOGIC = {
         "Steady Firebreathing": {
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
+        },
+    },
+
+    # Charmeleon - Version 2 (Combustion + Fire Blast)
+    "sv3pt5-5": {
+        "Combustion": {
+            "generator": charmeleon_combustion_actions,
+            "effect": charmeleon_combustion_effect,
+        },
+        "Fire Blast": {
+            "generator": charmeleon_fire_blast_actions,
+            "effect": charmeleon_fire_blast_effect,
+        },
+    },
+    "sv3pt5-169": {
+        "Combustion": {
+            "generator": charmeleon_combustion_actions,
+            "effect": charmeleon_combustion_effect,
+        },
+        "Fire Blast": {
+            "generator": charmeleon_fire_blast_actions,
+            "effect": charmeleon_fire_blast_effect,
         },
     },
 

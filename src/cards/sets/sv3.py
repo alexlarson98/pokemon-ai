@@ -15,6 +15,80 @@ from .svp import charmander_heat_tackle_actions, charmander_heat_tackle_effect
 
 
 # ============================================================================
+# CHARMELEON - VERSION 1: HEAT TACKLE (sv3-27)
+# ============================================================================
+
+def charmeleon_heat_tackle_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Charmeleon's "Heat Tackle" attack.
+
+    Attack: Heat Tackle [FF]
+    70 damage. This Pokemon also does 20 damage to itself.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Heat Tackle",
+        display_label="Heat Tackle - 70 Dmg (20 to self)"
+    )]
+
+
+def charmeleon_heat_tackle_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Charmeleon's "Heat Tackle" attack effect.
+
+    Deals 70 damage to opponent's Active Pokémon and 20 damage to itself.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 70 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=70,
+            attack_name="Heat Tackle"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    # Deal 20 damage to self (recoil damage - not affected by weakness/resistance)
+    state = apply_damage(
+        state=state,
+        target=card,
+        damage=20,
+        is_attack_damage=False,  # Self-damage is not attack damage
+        attacker=card
+    )
+
+    return state
+
+
+# ============================================================================
 # PIDGEY - VERSION 1: GUST (sv3-162, sv3-207)
 # ============================================================================
 
@@ -89,6 +163,14 @@ SV3_LOGIC = {
         "Heat Tackle": {
             "generator": charmander_heat_tackle_actions,
             "effect": charmander_heat_tackle_effect,
+        },
+    },
+
+    # Charmeleon - Version 1 (Heat Tackle)
+    "sv3-27": {
+        "Heat Tackle": {
+            "generator": charmeleon_heat_tackle_actions,
+            "effect": charmeleon_heat_tackle_effect,
         },
     },
 

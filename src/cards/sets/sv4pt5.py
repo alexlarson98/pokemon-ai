@@ -6,6 +6,10 @@ This module contains card-specific logic for Paldean Fates.
 For reprints, this module imports logic from the set where the card was first released.
 """
 
+from typing import List
+from models import GameState, CardInstance, Action, ActionType, PlayerState
+from actions import apply_damage, calculate_damage
+
 from cards.library.trainers import (
     rare_candy_effect,
     rare_candy_actions,
@@ -25,6 +29,109 @@ from .sv3pt5 import (
     pidgey_tackle_actions,
     pidgey_tackle_effect
 )
+
+
+# ============================================================================
+# CHARMELEON - VERSION 3: COMBUSTION + FLARE VEIL (sv4pt5-8, sv4pt5-110)
+# ============================================================================
+
+def charmeleon_v3_combustion_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Charmeleon's "Combustion" attack (Version 3).
+
+    Attack: Combustion [FF]
+    50 damage. No additional effects.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Combustion",
+        display_label="Combustion - 50 Dmg"
+    )]
+
+
+def charmeleon_v3_combustion_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Charmeleon's "Combustion" attack effect (Version 3).
+
+    Deals 50 damage to opponent's Active Pokémon.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 50 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=50,
+            attack_name="Combustion"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+def charmeleon_flare_veil_guard(state: GameState, card: CardInstance, context: dict) -> bool:
+    """
+    Guard for Charmeleon's "Flare Veil" ability.
+
+    Ability: Flare Veil
+    Prevent all effects of attacks used by your opponent's Pokemon done to this Pokemon.
+    (Damage is not an effect.)
+
+    This guard blocks attack effects (status conditions, special effects, etc.)
+    but NOT damage. It only applies to effects from opponent's attacks.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        context: Context dict containing:
+            - 'source': The source of the effect ('attack', 'ability', etc.)
+            - 'source_player_id': The player who owns the source
+            - 'effect_type': Type of effect being applied
+
+    Returns:
+        True if the effect should be blocked, False otherwise
+    """
+    # Only block effects from opponent's attacks
+    source = context.get('source')
+    source_player_id = context.get('source_player_id')
+
+    # Only block if it's from an attack
+    if source != 'attack':
+        return False
+
+    # Only block if it's from the opponent
+    if source_player_id == card.owner_id:
+        return False  # Don't block our own attack effects
+
+    # Block the effect (but not damage - damage is handled separately)
+    return True
 
 
 # ============================================================================
@@ -51,6 +158,26 @@ SV4PT5_LOGIC = {
         "Steady Firebreathing": {
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
+        },
+    },
+
+    # Charmeleon - Version 3 (Combustion 50 + Flare Veil guard)
+    "sv4pt5-8": {
+        "Combustion": {
+            "generator": charmeleon_v3_combustion_actions,
+            "effect": charmeleon_v3_combustion_effect,
+        },
+        "guards": {
+            "effect_prevention": charmeleon_flare_veil_guard,
+        },
+    },
+    "sv4pt5-110": {
+        "Combustion": {
+            "generator": charmeleon_v3_combustion_actions,
+            "effect": charmeleon_v3_combustion_effect,
+        },
+        "guards": {
+            "effect_prevention": charmeleon_flare_veil_guard,
         },
     },
 

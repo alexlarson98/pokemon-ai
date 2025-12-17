@@ -101,6 +101,71 @@ def charmander_live_coal_effect(state: GameState, card: CardInstance, action: Ac
 
 
 # ============================================================================
+# CHARMELEON - VERSION 4: STEADY FIREBREATHING (me2-12)
+# ============================================================================
+
+def charmeleon_steady_firebreathing_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Charmeleon's "Steady Firebreathing" attack.
+
+    Attack: Steady Firebreathing [F]
+    40 damage. No additional effects.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Steady Firebreathing",
+        display_label="Steady Firebreathing - 40 Dmg"
+    )]
+
+
+def charmeleon_steady_firebreathing_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Charmeleon's "Steady Firebreathing" attack effect.
+
+    Deals 40 damage to opponent's Active Pokémon.
+
+    Args:
+        state: Current game state
+        card: Charmeleon CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 40 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=40,
+            attack_name="Steady Firebreathing"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+# ============================================================================
 # ME2 LOGIC REGISTRY
 # ============================================================================
 
@@ -115,6 +180,14 @@ ME2_LOGIC = {
         # Ability: Agile (MODIFIER) - If no Energy attached, retreat cost = 0
         "modifiers": {
             "retreat_cost": charmander_agile_modifier,
+        },
+    },
+
+    # Charmeleon - Version 4 (Steady Firebreathing)
+    "me2-12": {
+        "Steady Firebreathing": {
+            "generator": charmeleon_steady_firebreathing_actions,
+            "effect": charmeleon_steady_firebreathing_effect,
         },
     },
 }
