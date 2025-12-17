@@ -566,14 +566,21 @@ def generate_evolution_actions(
     board_pokemon = player.board.get_all_pokemon()
 
     # Get all evolution cards of the specified subtype from hand
-    evolution_cards = []
+    # Group by functional ID to avoid duplicate actions for identical cards
+    evolution_cards_by_functional_id = {}
     for hand_card in player.hand.cards:
         if hand_card.id == card.id:
             continue  # Skip the item card itself
         card_def = get_card_definition(hand_card)
         if (isinstance(card_def, PokemonCard) and
             hasattr(card_def, 'subtypes') and evolution_subtype in card_def.subtypes):
-            evolution_cards.append((hand_card, card_def))
+            # Use functional ID to deduplicate identical cards
+            functional_id = player.functional_id_map.get(hand_card.card_id, hand_card.card_id)
+            if functional_id not in evolution_cards_by_functional_id:
+                evolution_cards_by_functional_id[functional_id] = (hand_card, card_def)
+
+    # Convert to list for iteration
+    evolution_cards = list(evolution_cards_by_functional_id.values())
 
     # Find valid (target, evolution) pairs
     for target_pokemon in board_pokemon:
