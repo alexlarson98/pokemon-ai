@@ -4,7 +4,7 @@ The "Referee" - Enforces the Constitution and manages state transitions.
 Never guesses; only validates and executes.
 """
 
-from typing import List, Optional, Set, Tuple, Dict
+from typing import List, Optional, Set, Tuple, Dict, Union
 import random
 from copy import deepcopy
 
@@ -1524,17 +1524,20 @@ class PokemonEngine:
         self,
         state: GameState,
         action_type: str,
-        context: Optional[Dict] = None
+        context_or_player: Optional[Union[Dict, int]] = None
     ) -> bool:
         """
         Check if an action is allowed given current active effects.
 
         This is a permission hook that checks active effects before allowing actions.
+        Supports two call patterns:
+        1. check_global_permission(state, action_type, player_id)
+        2. check_global_permission(state, action_type, {"card_id": ..., "player_id": ...})
 
         Args:
             state: Current game state
-            action_type: Type of action being attempted (e.g., "attack", "retreat", "bench_damage", "ability")
-            context: Additional context (e.g., {"card_id": "card_123", "player_id": 0})
+            action_type: Type of action being attempted (e.g., "attack", "retreat", "bench_damage", "ability", "play_item", "play_supporter")
+            context_or_player: Either an int (player_id) or dict with context (card_id, player_id)
 
         Returns:
             True if action is allowed, False if blocked by an effect
@@ -1544,14 +1547,21 @@ class PokemonEngine:
             - Iron Leaves ex: Blocks "attack" for specific card
             - Path to the Peak: Blocks "ability" for VSTAR Pokémon
             - Klefki: Blocks "ability" for all Pokémon (from Active Spot)
+            - Item Lock: Blocks "play_item"
         """
-        if context is None:
+        # Normalize input to dict format
+        if isinstance(context_or_player, int):
+            context = {"player_id": context_or_player}
+        elif context_or_player is None:
             context = {}
+        else:
+            context = context_or_player
+
+        acting_player_id = context.get("player_id")
 
         # SPECIAL CHECK: Klefki-style passive ability locks (from Active Spot)
         if action_type == "ability":
             acting_card_id = context.get("card_id")
-            acting_player_id = context.get("player_id")
 
             if acting_card_id and acting_player_id is not None:
                 # Check opponent's Active Spot for passive ability blockers
@@ -1569,30 +1579,46 @@ class PokemonEngine:
                             effect.params.get("blocks_opponent_abilities")):
                             return False
 
-        # Check all active effects
-        for effect in state.active_effects:
-            prevents = effect.params.get("prevents")
+        # Check all active effects for action blocks
+        if hasattr(state, 'active_effects') and state.active_effects:
+            for effect in state.active_effects:
+                # Check dict-style effects (e.g., Item Lock)
+                if isinstance(effect, dict) and effect.get('type') == 'ACTION_BLOCK':
+                    blocked_action = effect.get('blocked_action')
+                    affected_player = effect.get('affected_player')
 
-            if prevents == action_type:
-                # Check if effect applies to this specific action
-                target_card_id = effect.target_card_id
-                acting_card_id = context.get("card_id")
+                    if blocked_action == action_type:
+                        # Check if it affects this player
+                        if affected_player == 'all' or affected_player == acting_player_id:
+                            return False
+                        if affected_player == 'opponent':
+                            effect_owner = effect.get('owner_id')
+                            if effect_owner is not None and effect_owner != acting_player_id:
+                                return False
 
-                # If effect has a specific target, check if it matches
-                if target_card_id and acting_card_id:
-                    if target_card_id != acting_card_id:
-                        continue  # This effect doesn't apply to this card
+                # Check Effect object-style effects (e.g., bench_damage, attack blocks)
+                if hasattr(effect, 'params'):
+                    prevents = effect.params.get("prevents")
 
-                # If effect has a player target, check if it matches
-                target_player_id = effect.target_player_id
-                acting_player_id = context.get("player_id")
+                    if prevents == action_type:
+                        # Check if effect applies to this specific action
+                        target_card_id = effect.target_card_id
+                        acting_card_id = context.get("card_id")
 
-                if target_player_id is not None and acting_player_id is not None:
-                    if target_player_id != acting_player_id:
-                        continue  # This effect doesn't apply to this player
+                        # If effect has a specific target, check if it matches
+                        if target_card_id and acting_card_id:
+                            if target_card_id != acting_card_id:
+                                continue  # This effect doesn't apply to this card
 
-                # Effect blocks this action
-                return False
+                        # If effect has a player target, check if it matches
+                        target_player_id = effect.target_player_id
+
+                        if target_player_id is not None and acting_player_id is not None:
+                            if target_player_id != acting_player_id:
+                                continue  # This effect doesn't apply to this player
+
+                        # Effect blocks this action
+                        return False
 
         # No blocking effects found
         return True
@@ -1684,34 +1710,6 @@ class PokemonEngine:
             state.winner_id = 1
 
         return state
-
-    def _calculate_prizes(self, knocked_out: CardInstance) -> int:
-        """
-        Calculate number of prizes to award for knocking out a Pokémon.
-
-        Constitution Prize Rules:
-        - MEGA: 3 prizes (do NOT end turn when evolving)
-        - ex, V, VMAX, VSTAR, GX: 2 prizes
-        - Basic/Stage 1/Stage 2: 1 prize
-
-        Args:
-            knocked_out: The KO'd Pokémon
-
-        Returns:
-            Number of prizes to award (1, 2, or 3)
-        """
-        subtypes = self._get_card_subtypes(knocked_out)
-
-        # MEGA Pokémon: 3 prizes
-        if Subtype.MEGA in subtypes:
-            return 3
-
-        # ex, V, VMAX, VSTAR, GX: 2 prizes
-        if any(st in subtypes for st in [Subtype.EX, Subtype.V, Subtype.VMAX, Subtype.VSTAR, Subtype.GX]):
-            return 2
-
-        # Default: 1 prize
-        return 1
 
     def _handle_knockout(self, state: GameState, knocked_out: CardInstance, winner: PlayerState, killer: Optional[CardInstance] = None) -> GameState:
         """
@@ -2121,42 +2119,6 @@ class PokemonEngine:
 
         return True
 
-    def check_global_permission(self, state: GameState, action_type: str, player_id: int) -> bool:
-        """
-        Check if an action is permitted based on global effects (e.g., Item Lock).
-
-        Architecture: This enables card abilities like "Your opponent can't play Item cards"
-        to be implemented via active_effects, without hardcoding logic in the engine.
-
-        Args:
-            state: Current game state
-            action_type: Type of action (e.g., 'play_item', 'play_supporter', 'attach_energy')
-            player_id: Player attempting the action
-
-        Returns:
-            True if action is permitted, False if blocked
-        """
-        # Check for permission blocks in active effects
-        if hasattr(state, 'active_effects') and state.active_effects:
-            for effect in state.active_effects:
-                # Check for action blocks (e.g., Item Lock)
-                if effect.get('type') == 'ACTION_BLOCK':
-                    blocked_action = effect.get('blocked_action')
-                    affected_player = effect.get('affected_player')
-
-                    # Check if this effect blocks the current action
-                    if blocked_action == action_type:
-                        # Check if it affects this player
-                        # affected_player can be: 'opponent', 'all', specific player_id
-                        if affected_player == 'all' or affected_player == player_id:
-                            return False
-                        if affected_player == 'opponent':
-                            # Determine who set the effect (usually the other player)
-                            effect_owner = effect.get('owner_id')
-                            if effect_owner is not None and effect_owner != player_id:
-                                return False
-
-        return True  # Default: action is permitted
 
     def calculate_max_hp(self, state: GameState, pokemon: CardInstance) -> int:
         """
@@ -2290,7 +2252,9 @@ class PokemonEngine:
         if victim_def and hasattr(victim_def, 'subtypes'):
             from models import Subtype
             # Determine base prize count from victim's rule box
-            if Subtype.VMAX in victim_def.subtypes or Subtype.VSTAR in victim_def.subtypes:
+            if Subtype.MEGA in victim_def.subtypes:
+                base_prizes = 3  # MEGA Pokemon award 3 prizes
+            elif Subtype.VMAX in victim_def.subtypes or Subtype.VSTAR in victim_def.subtypes:
                 base_prizes = 3
             elif Subtype.V in victim_def.subtypes or Subtype.EX in victim_def.subtypes or Subtype.GX in victim_def.subtypes:
                 base_prizes = 2

@@ -57,7 +57,7 @@ class TestPoisonedStatus:
         active = player.board.active_spot
 
         # Poison the active Pokemon
-        active.status_conditions.append(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.POISONED)
         initial_damage = active.damage_counters
 
         # Apply status damage (between turns)
@@ -74,7 +74,7 @@ class TestPoisonedStatus:
         player = state.players[0]
         active = player.board.active_spot
 
-        active.status_conditions.append(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.POISONED)
 
         # Apply status damage 3 times (3 turns)
         for _ in range(3):
@@ -96,7 +96,7 @@ class TestBurnedStatus:
         active = player.board.active_spot
 
         # Burn the active Pokemon
-        active.status_conditions.append(StatusCondition.BURNED)
+        active.status_conditions.add(StatusCondition.BURNED)
         initial_damage = active.damage_counters
 
         # Apply status damage (between turns)
@@ -113,7 +113,7 @@ class TestBurnedStatus:
         player = state.players[0]
         active = player.board.active_spot
 
-        active.status_conditions.append(StatusCondition.BURNED)
+        active.status_conditions.add(StatusCondition.BURNED)
 
         # Apply status damage 3 times (3 turns)
         for _ in range(3):
@@ -135,7 +135,7 @@ class TestAsleepStatus:
         active = player.board.active_spot
 
         # Make Pokemon Asleep
-        active.status_conditions.append(StatusCondition.ASLEEP)
+        active.status_conditions.add(StatusCondition.ASLEEP)
 
         # Attach energy
         energy = create_card_instance("base1-98", owner_id=0)
@@ -154,7 +154,7 @@ class TestAsleepStatus:
         active = player.board.active_spot
 
         # Make Pokemon Asleep
-        active.status_conditions.append(StatusCondition.ASLEEP)
+        active.status_conditions.add(StatusCondition.ASLEEP)
 
         # Add bench Pokemon
         bench_mon = create_card_instance("sv2-81", owner_id=0)
@@ -177,7 +177,7 @@ class TestParalyzedStatus:
         active = player.board.active_spot
 
         # Make Pokemon Paralyzed
-        active.status_conditions.append(StatusCondition.PARALYZED)
+        active.status_conditions.add(StatusCondition.PARALYZED)
 
         # Attach energy
         energy = create_card_instance("base1-98", owner_id=0)
@@ -196,7 +196,7 @@ class TestParalyzedStatus:
         active = player.board.active_spot
 
         # Make Pokemon Paralyzed
-        active.status_conditions.append(StatusCondition.PARALYZED)
+        active.status_conditions.add(StatusCondition.PARALYZED)
 
         # Add bench Pokemon
         bench_mon = create_card_instance("sv2-81", owner_id=0)
@@ -219,7 +219,7 @@ class TestConfusedStatus:
         active = player.board.active_spot
 
         # Make Pokemon Confused
-        active.status_conditions.append(StatusCondition.CONFUSED)
+        active.status_conditions.add(StatusCondition.CONFUSED)
 
         # Attach energy
         energy = create_card_instance("base1-98", owner_id=0)
@@ -238,7 +238,7 @@ class TestConfusedStatus:
         active = player.board.active_spot
 
         # Make Pokemon Confused
-        active.status_conditions.append(StatusCondition.CONFUSED)
+        active.status_conditions.add(StatusCondition.CONFUSED)
 
         # Add bench Pokemon
         bench_mon = create_card_instance("sv2-81", owner_id=0)
@@ -265,8 +265,8 @@ class TestStatusConditionInteractions:
         active = player.board.active_spot
 
         # Apply both Poisoned and Burned
-        active.status_conditions.append(StatusCondition.POISONED)
-        active.status_conditions.append(StatusCondition.BURNED)
+        active.status_conditions.add(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.BURNED)
 
         initial_damage = active.damage_counters
 
@@ -285,8 +285,8 @@ class TestStatusConditionInteractions:
         active = player.board.active_spot
 
         # Apply both conditions
-        active.status_conditions.append(StatusCondition.ASLEEP)
-        active.status_conditions.append(StatusCondition.PARALYZED)
+        active.status_conditions.add(StatusCondition.ASLEEP)
+        active.status_conditions.add(StatusCondition.PARALYZED)
 
         # Attach energy
         energy = create_card_instance("base1-98", owner_id=0)
@@ -315,8 +315,8 @@ class TestStatusConditionClearing:
         active = player.board.active_spot
 
         # Apply multiple status conditions
-        active.status_conditions.append(StatusCondition.POISONED)
-        active.status_conditions.append(StatusCondition.CONFUSED)
+        active.status_conditions.add(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.CONFUSED)
 
         # Add bench Pokemon
         bench_mon = create_card_instance("sv2-81", owner_id=0)
@@ -355,7 +355,7 @@ class TestStatusDamageDuringCleanup:
         active = player.board.active_spot
 
         # Poison the active Pokemon
-        active.status_conditions.append(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.POISONED)
 
         # Set phase to CLEANUP
         state.current_phase = GamePhase.CLEANUP
@@ -382,7 +382,7 @@ class TestStatusConditionKnockout:
         # Create Pokemon with low HP
         active = create_card_instance("sv3pt5-16", owner_id=0)  # Pidgey (60 HP)
         active.damage_counters = 5  # 50 damage (10 HP remaining)
-        active.status_conditions.append(StatusCondition.POISONED)
+        active.status_conditions.add(StatusCondition.POISONED)
         player0.board.active_spot = active
 
         player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)

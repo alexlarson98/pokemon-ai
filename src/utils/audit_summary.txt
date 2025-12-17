@@ -1,0 +1,25 @@
+======================================================================
+POKÉMON TCG ENGINE - CARD AUDIT SUMMARY
+======================================================================
+
+Total Cards: 4072
+
+SUPERTYPE BREAKDOWN
+----------------------------------------------------------------------
+Energy                 202 cards
+Pokemon               3338 cards
+Trainer                532 cards
+
+LOGIC CATEGORY BREAKDOWN
+----------------------------------------------------------------------
+simple                2168 cards
+complex                745 cards
+vanilla                425 cards
+supporter              290 cards
+basic                  183 cards
+item                   130 cards
+tool                    65 cards
+stadium                 47 cards
+special                 19 cards
+
+NOTE: Check 'audit_master.csv' column 'immediate_parent' to verify JSON data integrity.
