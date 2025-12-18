@@ -3,6 +3,7 @@ Generate AI implementation prompts for Pokemon TCG cards (Pokemon & Trainers)
 
 Features:
 - "4 Pillars" Architecture (Actions, Modifiers, Guards, Hooks)
+- "Stack Architecture" for multi-step effects (SearchDeckStep, SelectFromZoneStep, etc.)
 - HYBRID DICT STRUCTURE:
     - Pokemon: "Attack Name": {generator, effect}
     - Trainers: "actions": {"play": {generator, effect}}
@@ -20,23 +21,121 @@ from pathlib import Path
 from typing import List, Dict, Any
 from collections import defaultdict
 
+# --- STACK ARCHITECTURE DETECTION ---
+
+def detect_stack_pattern(text: str) -> dict:
+    """
+    Detect if card text requires Stack Architecture for multi-step resolution.
+
+    Stack Architecture is used when effects require:
+    - Sequential user decisions (search deck -> select cards -> place them)
+    - Costs that must be paid before effects resolve (discard 2 cards -> search)
+    - Multiple targets that need individual selection
+
+    Returns dict with:
+        'use_stack': bool - Whether to use stack architecture
+        'pattern': str - The detected pattern type
+        'steps': list - Suggested resolution steps
+    """
+    text_lower = text.lower()
+
+    result = {'use_stack': False, 'pattern': None, 'steps': []}
+
+    # Pattern 1: Search deck effects
+    search_keywords = ['search your deck', 'look at your deck', 'search your discard']
+    if any(k in text_lower for k in search_keywords):
+        result['use_stack'] = True
+        result['pattern'] = 'SEARCH_DECK'
+        result['steps'].append('SearchDeckStep')
+
+        # Check for shuffle requirement
+        if 'shuffle' in text_lower:
+            result['steps'].append('shuffle_after=True')
+
+    # Pattern 2: Discard cost before effect
+    discard_cost_patterns = [
+        'discard 2', 'discard 3', 'discard a card', 'discard cards from your hand'
+    ]
+    if any(p in text_lower for p in discard_cost_patterns):
+        if result['use_stack']:
+            # Discard is a cost before search
+            result['steps'].insert(0, 'SelectFromZoneStep (DISCARD_COST)')
+        else:
+            result['use_stack'] = True
+            result['pattern'] = 'DISCARD_COST'
+            result['steps'].append('SelectFromZoneStep (DISCARD_COST)')
+
+    # Pattern 3: Select target Pokemon
+    select_target_patterns = [
+        'choose a pokemon', 'choose one of your', 'select a pokemon',
+        'put onto', 'evolve', '1 of your'
+    ]
+    if any(p in text_lower for p in select_target_patterns):
+        if not result['use_stack']:
+            result['use_stack'] = True
+            result['pattern'] = 'SELECT_TARGET'
+        result['steps'].append('SelectFromZoneStep (target selection)')
+
+    # Pattern 4: Energy attachment from deck/discard
+    if ('attach' in text_lower and
+        ('from your deck' in text_lower or 'from your discard' in text_lower)):
+        result['use_stack'] = True
+        result['pattern'] = 'SEARCH_AND_ATTACH'
+        result['steps'] = ['SearchAndAttachState (use InterruptPhase.SELECT_COUNT for upfront selection)']
+
+    # Pattern 5: Move/switch Pokemon
+    if 'switch' in text_lower and 'your active pokemon' in text_lower:
+        result['use_stack'] = True
+        result['pattern'] = 'SWITCH_POKEMON'
+        result['steps'].append('SelectFromZoneStep (BENCH -> ACTIVE)')
+
+    return result
+
+
 # --- CLASSIFICATION LOGIC ---
 
 def classify_text_pillar(text: str, subtypes: tuple) -> str:
     """Classify logic into one of the 4 Architectural Pillars."""
     text_lower = text.lower()
 
-    # 1. MODIFIERS (Changes Numbers)
+    # 0. HOOKS (Triggered Events - check FIRST for "when you play" patterns)
+    # These take priority over "once during your turn" because they're triggered events
+    # Example: "Once during your turn, when you play this Pokemon..." = HOOK (not ACTION)
+    hook_keywords = [
+        'when you play this pokemon',
+        'when this pokemon is knocked out',
+        'when you attach',
+        'put this card into'
+    ]
+    for k in hook_keywords:
+        if k in text_lower:
+            return 'HOOK'
+
+    # 1. ACTIONS (Player-activated abilities)
+    # "Once during your turn, you may..." WITHOUT a trigger is a player-activated ability
+    action_keywords = [
+        'once during your turn',
+        'you may use',
+        'as often as you like during your turn',
+    ]
+    for k in action_keywords:
+        if k in text_lower:
+            return 'ACTION'
+
+    # 2. MODIFIERS (Changes Numbers)
+    # Note: Some patterns have numbers in between (e.g., "takes 30 less damage")
     modifier_keywords = [
         'retreat cost is', 'less retreat cost', 'more retreat cost',
         'takes less damage', 'takes more damage', 'maximum hp', 'get +',
-        'attacks do', 'deal more damage', 'hp is', 'bench size', 'have no retreat cost'
+        'attacks do', 'deal more damage', 'hp is', 'bench size', 'have no retreat cost',
+        'less damage from attacks', 'more damage from attacks',  # Handles "takes X less damage from attacks"
+        'damage done to this', 'damage from attacks',  # Other damage modifier patterns
     ]
     for k in modifier_keywords:
         if k in text_lower:
             return 'MODIFIER'
 
-    # 2. GUARDS (Blocks Permissions/Rules)
+    # 3. GUARDS (Blocks Permissions/Rules)
     guard_keywords = [
         'prevent all damage', 'prevent all effects', "can't be affected",
         "can't be asleep", "can't be paralyzed", "can't be confused",
@@ -47,17 +146,17 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'GUARD'
 
-    # 3. HOOKS (Triggered Events)
-    hook_keywords = [
-        'when you play this pokemon', 'when this pokemon is knocked out',
-        'whenever', 'after you', 'when you attach', 'if this pokemon is in the active spot',
-        'put this card into' 
+    # 4. Additional HOOKS (lower priority triggered events)
+    # These are checked after modifiers/guards but still represent automatic triggers
+    additional_hook_keywords = [
+        'whenever',
+        'after you',
     ]
-    for k in hook_keywords:
+    for k in additional_hook_keywords:
         if k in text_lower:
             return 'HOOK'
 
-    # 4. ACTIONS (Default)
+    # 5. ACTIONS (Default)
     return 'ACTION'
 
 
@@ -125,7 +224,21 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     card_snake = to_snake_case(card_name)
     
     prompt = f"# {card_name} Implementation\n\n"
-    prompt += "Implement this card using the **4 Pillars Architecture**.\n"
+    prompt += "Implement this card using the **4 Pillars Architecture** and **Stack Architecture** (when applicable).\n\n"
+    prompt += "## Architecture Overview\n\n"
+    prompt += "### 4 Pillars Architecture\n"
+    prompt += "- **ACTIONS**: Generator functions return legal actions; Effect functions apply the action\n"
+    prompt += "- **MODIFIERS**: Functions that modify numeric values (damage, HP, retreat cost)\n"
+    prompt += "- **GUARDS**: Functions that block or prevent actions/effects\n"
+    prompt += "- **HOOKS**: Functions triggered by game events (on_play, on_knockout, etc.)\n\n"
+    prompt += "### Stack Architecture (for multi-step effects)\n"
+    prompt += "Use when effects require sequential decisions or costs:\n"
+    prompt += "- **SearchDeckStep**: Search deck for cards matching filter criteria\n"
+    prompt += "- **SelectFromZoneStep**: Select cards from hand/bench/board with filters\n"
+    prompt += "- **SearchAndAttachState**: For abilities that search and attach energy (use `InterruptPhase.SELECT_COUNT`)\n"
+    prompt += "- Push steps onto `state.push_step(step)` - they resolve in LIFO order\n"
+    prompt += "- Use `on_complete_callback` for chaining steps\n\n"
+    prompt += "### Registry Structure\n"
     prompt += "- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.\n"
     prompt += "- **Trainers:** Use `\"actions\": {\"play\": ...}`.\n\n"
 
@@ -153,72 +266,97 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
         if supertype == 'Trainer':
             text_lines = first_card.get('rules', [])
             full_text = " ".join(text_lines)
-            
+
             # Decide Pillar
             if any(s in subtypes for s in ['Supporter', 'Item']):
-                pillar = 'ACTION' 
+                pillar = 'ACTION'
             else:
                 pillar = classify_text_pillar(full_text, subtypes)
 
+            # Detect Stack Architecture needs
+            stack_info = detect_stack_pattern(full_text)
+
             features.append({
-                'name': 'play' if pillar == 'ACTION' else card_snake, 
+                'name': 'play' if pillar == 'ACTION' else card_snake,
                 'snake': card_snake,
                 'pillar': pillar,
                 'text': full_text,
-                'is_attack': False
+                'is_attack': False,
+                'stack_info': stack_info
             })
 
         else: # Pokémon
             for ab in first_card.get('abilities', []):
+                ab_text = ab.get('text', '')
                 features.append({
                     'name': ab.get('name', ''),
                     'snake': to_snake_case(ab.get('name', '')),
-                    'pillar': classify_text_pillar(ab.get('text', ''), subtypes),
-                    'text': ab.get('text', ''),
-                    'is_attack': False
+                    'pillar': classify_text_pillar(ab_text, subtypes),
+                    'text': ab_text,
+                    'is_attack': False,
+                    'stack_info': detect_stack_pattern(ab_text)
                 })
             for atk in first_card.get('attacks', []):
+                atk_text = atk.get('text', '')
                 features.append({
                     'name': atk.get('name', ''),
                     'snake': to_snake_case(atk.get('name', '')),
                     'pillar': 'ACTION',
-                    'text': atk.get('text', ''),
+                    'text': atk_text,
                     'cost': format_energy_cost(atk.get('cost', [])),
                     'damage': atk.get('damage', ''),
-                    'is_attack': True
+                    'is_attack': True,
+                    'stack_info': detect_stack_pattern(atk_text)
                 })
 
         # --- PROMPT GENERATION LOOP ---
         for f in features:
+            stack_info = f.get('stack_info', {'use_stack': False})
+
             if f['is_attack']:
                 # Attack
                 gen_func = f"{card_snake}_{f['snake']}_actions"
                 eff_func = f"{card_snake}_{f['snake']}_effect"
                 generated_functions.extend([gen_func, eff_func])
-                
+
                 prompt += f"### Attack: {f['name']} {f['cost']} {f['damage']}\n"
                 if f['text']: prompt += f"_{f['text']}_\n"
-                prompt += f"- Implement `{gen_func}` and `{eff_func}`.\n\n"
+                prompt += f"- Implement `{gen_func}` and `{eff_func}`.\n"
+
+                # Add Stack Architecture guidance if detected
+                if stack_info['use_stack']:
+                    prompt += f"\n**Stack Architecture Required** (Pattern: `{stack_info['pattern']}`)\n"
+                    prompt += "Resolution Steps:\n"
+                    for step in stack_info['steps']:
+                        prompt += f"  - `{step}`\n"
+                prompt += "\n"
             else:
                 # Ability / Trainer
                 prompt += f"### Feature: {f['name']} ({f['pillar']})\n"
                 if f['text']: prompt += f"_{f['text']}_\n\n"
-                
+
                 if f['pillar'] == 'MODIFIER':
                     func = f"{card_snake}_modifier" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_modifier"
                     generated_functions.append(func)
                     prompt += f"- Implement `{func}(state, card, current_value)`\n"
-                    
+
                 elif f['pillar'] == 'GUARD':
                     func = f"{card_snake}_guard" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_guard"
                     generated_functions.append(func)
                     prompt += f"- Implement `{func}(state, card, context)`\n"
-                    
+
                 elif f['pillar'] == 'HOOK':
                     func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
                     generated_functions.append(func)
                     prompt += f"- Implement `{func}(state, card, context)`\n"
-                    
+
+                    # Add Stack Architecture guidance for hooks if detected
+                    if stack_info['use_stack']:
+                        prompt += f"\n**Stack Architecture Required** (Pattern: `{stack_info['pattern']}`)\n"
+                        prompt += "Resolution Steps:\n"
+                        for step in stack_info['steps']:
+                            prompt += f"  - `{step}`\n"
+
                 else: # ACTION
                     if supertype == 'Trainer':
                         gen_func = f"{card_snake}_actions"
@@ -226,15 +364,32 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                     else:
                         gen_func = f"{card_snake}_{f['snake']}_actions"
                         eff_func = f"{card_snake}_{f['snake']}_effect"
-                        
+
                     generated_functions.extend([gen_func, eff_func])
-                    
+
                     prompt += f"- Implement `{gen_func}(state, card, player)` (Generator)\n"
                     prompt += f"- Implement `{eff_func}(state, card, action)` (Effect)\n"
-                    
+
                     if "once during your turn" in f['text'].lower():
                         prompt += f"  - **Requirement:** Check usage flags for Once Per Turn.\n"
-                
+
+                    # Add Stack Architecture guidance for actions if detected
+                    if stack_info['use_stack']:
+                        prompt += f"\n**Stack Architecture Required** (Pattern: `{stack_info['pattern']}`)\n"
+                        prompt += "The effect function should push resolution steps onto the stack:\n"
+                        prompt += "```python\n"
+                        prompt += "def effect(state, card, action):\n"
+                        prompt += "    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose\n"
+                        prompt += "    # Push steps in reverse order (LIFO)\n"
+                        for step in reversed(stack_info['steps']):
+                            prompt += f"    # {step}\n"
+                        prompt += "    state.push_step(step)\n"
+                        prompt += "    return state\n"
+                        prompt += "```\n"
+                        prompt += "Resolution Steps:\n"
+                        for step in stack_info['steps']:
+                            prompt += f"  - `{step}`\n"
+
                 prompt += "\n"
 
 
