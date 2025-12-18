@@ -499,15 +499,17 @@ class TestCharizardExInfernalReignAndAttack:
         state.pending_interrupt = interrupt
 
         # Select both energy cards
+        # Note: Actions are deduplicated by card name, so we see 1 action at a time
         actions = engine.get_legal_actions(state)
         select_actions = [a for a in actions if a.action_type == ActionType.SEARCH_SELECT_CARD]
-        assert len(select_actions) == 2, "Should have 2 energy cards to select"
+        assert len(select_actions) == 1, "Should have 1 action (deduplicated by card name)"
 
         # Select first energy
         state = engine.step(state, select_actions[0])
-        # Select second energy
+        # Select second energy (same card name, different instance)
         actions = engine.get_legal_actions(state)
         select_actions = [a for a in actions if a.action_type == ActionType.SEARCH_SELECT_CARD]
+        assert len(select_actions) == 1, "Should have 1 action for second energy"
         state = engine.step(state, select_actions[0])
 
         # Confirm selection

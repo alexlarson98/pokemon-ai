@@ -3377,18 +3377,21 @@ class PokemonEngine:
         """
         owner = state.get_player(knocked_out.owner_id)
 
-        # Move to discard (with all attached cards AND evolution chain)
+        # Move to discard (with all attached cards AND previous evolution stages)
         # First, discard all previous evolution stages (the Pokemon Stack)
-        from cards.factory import create_card_instance
-        for prev_card_id in knocked_out.evolution_chain:
-            # Reconstruct the card from its ID and add to discard
-            prev_card = create_card_instance(prev_card_id, owner_id=knocked_out.owner_id)
-            owner.discard.add_card(prev_card)
+        # Use previous_stages (actual CardInstance objects) to preserve card identity
+        for prev_stage in knocked_out.previous_stages:
+            owner.discard.add_card(prev_stage)
+            # Also discard any energy/tools attached to previous stages
+            for energy in prev_stage.attached_energy:
+                owner.discard.add_card(energy)
+            for tool in prev_stage.attached_tools:
+                owner.discard.add_card(tool)
 
         # Then discard the top evolution (the current knocked_out card)
         owner.discard.add_card(knocked_out)
 
-        # Finally, discard all attached cards
+        # Finally, discard all attached cards on the top evolution
         for energy in knocked_out.attached_energy:
             owner.discard.add_card(energy)
         for tool in knocked_out.attached_tools:

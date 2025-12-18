@@ -963,6 +963,13 @@ def evolve_pokemon(
     evolution_card.evolution_chain = target.evolution_chain + [target.card_id]
     evolution_card.abilities_used_this_turn = target.abilities_used_this_turn.copy()
 
+    # Store previous stage card(s) underneath the evolved Pokemon
+    # This preserves card conservation - the basic/stage1 cards aren't destroyed
+    # Clear the target's attached cards first (they're transferred, not kept on the basic)
+    target.attached_energy = []
+    target.attached_tools = []
+    evolution_card.previous_stages = target.previous_stages + [target]
+
     # Transfer active effects that target this specific Pokémon
     for effect in state.active_effects:
         if effect.target_card_id == target.id:

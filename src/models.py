@@ -171,6 +171,7 @@ class CardInstance(BaseModel):
     attached_energy: List['CardInstance'] = Field(default_factory=list, description="Energy cards attached")
     attached_tools: List['CardInstance'] = Field(default_factory=list, description="Tool cards attached")
     evolution_chain: List[str] = Field(default_factory=list, description="Card IDs of evolution history")
+    previous_stages: List['CardInstance'] = Field(default_factory=list, description="Previous stage Pokemon cards (kept under evolved Pokemon)")
 
     # Temporal state
     turns_in_play: int = Field(0, description="Number of turns since played (for evolution sickness)")
