@@ -714,7 +714,8 @@ class EvolveTargetStep(ResolutionStep):
 # Legacy support - keep SearchAndAttachState for backward compatibility
 class InterruptPhase(str, Enum):
     """Phases for multi-step interrupt resolution (LEGACY - use ResolutionStep instead)."""
-    SEARCH_SELECT = "search_select"     # Selecting cards from deck search
+    SELECT_COUNT = "select_count"       # Selecting how many cards to search (upfront)
+    SEARCH_SELECT = "search_select"     # Selecting cards from deck search (legacy iterative)
     ATTACH_ENERGY = "attach_energy"     # Choosing where to attach energy
 
 
@@ -726,11 +727,11 @@ class SearchAndAttachState(BaseModel):
     the ResolutionStep architecture with resolution_stack instead.
 
     This enables MCTS to break down complex abilities into atomic choices:
-    1. Search phase: Select up to N cards from deck
+    1. Count phase: Select how many cards to search (0, 1, 2, ... up to max)
     2. Attach phase: Choose target for each selected card (one at a time)
 
-    Example Flow (Infernal Reign):
-    - Phase 1: Select 0-3 Fire Energy from deck
+    Example Flow (Infernal Reign with 3 Fire Energy in deck):
+    - Phase 1: Select count [0 (decline), 1, 2, 3]
     - Phase 2: Attach Energy 1 to [target choices]
     - Phase 3: Attach Energy 2 to [target choices]
     - Phase 4: Attach Energy 3 to [target choices]
@@ -742,7 +743,7 @@ class SearchAndAttachState(BaseModel):
     player_id: int = Field(..., description="Player who controls this ability")
 
     # Current phase
-    phase: InterruptPhase = Field(InterruptPhase.SEARCH_SELECT, description="Current interrupt phase")
+    phase: InterruptPhase = Field(InterruptPhase.SELECT_COUNT, description="Current interrupt phase")
 
     # Search parameters
     search_filter: Dict = Field(default_factory=dict, description="Filter for searchable cards (e.g., {'energy_type': 'Fire', 'subtype': 'Basic'})")
@@ -752,6 +753,7 @@ class SearchAndAttachState(BaseModel):
     selected_card_ids: List[str] = Field(default_factory=list, description="Cards selected during search phase")
     cards_to_attach: List[str] = Field(default_factory=list, description="Remaining cards to attach (in order)")
     current_attach_index: int = Field(0, description="Index of current card being attached")
+    card_definition_map: Dict[str, str] = Field(default_factory=dict, description="Maps instance ID to card definition ID")
 
     # Completion flag
     is_complete: bool = Field(False, description="Whether all steps are done")
@@ -789,6 +791,7 @@ class ActionType(str, Enum):
     PROMOTE_ACTIVE = "promote_active"
 
     # Interrupt Stack Actions (LEGACY - kept for backward compatibility)
+    SEARCH_SELECT_COUNT = "search_select_count"   # Select how many cards to search (upfront count selection)
     SEARCH_SELECT_CARD = "search_select_card"     # Select a card during search phase
     SEARCH_CONFIRM = "search_confirm"             # Confirm search selection (done selecting)
     INTERRUPT_ATTACH_ENERGY = "interrupt_attach_energy"  # Attach energy during interrupt

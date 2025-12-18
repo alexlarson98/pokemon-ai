@@ -448,5 +448,149 @@ class TestEnergyCalculation:
         assert total_energy == 3, "Should count all 3 energy cards"
 
 
+class TestCharizardExInfernalReignAndAttack:
+    """Test Charizard ex Infernal Reign ability and Burning Darkness attack."""
+
+    def test_infernal_reign_attaches_energy_with_correct_card_id(self, engine):
+        """
+        Infernal Reign should attach energy with correct card_id so attacks work.
+
+        This tests the fix for the bug where energy attached via SearchAndAttachState
+        had an invalid card_id, causing _calculate_provided_energy to return empty.
+        """
+        from models import SearchAndAttachState, InterruptPhase, EnergyType, Subtype
+
+        # Create game state with Charizard ex as active
+        player0 = PlayerState(player_id=0, name='Player 0')
+        player1 = PlayerState(player_id=1, name='Player 1')
+
+        charizard = create_card_instance("svp-56", owner_id=0)  # Charizard ex
+        player0.board.active_spot = charizard
+        player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+        # Add Basic Fire Energy to deck
+        fire_energy_1 = create_card_instance("sve-2", owner_id=0)  # Basic Fire Energy
+        fire_energy_2 = create_card_instance("sve-2", owner_id=0)  # Basic Fire Energy
+        player0.deck.add_card(fire_energy_1)
+        player0.deck.add_card(fire_energy_2)
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=2,
+            active_player_index=0,
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+
+        # Create a SearchAndAttachState interrupt (simulating Infernal Reign trigger)
+        interrupt = SearchAndAttachState(
+            ability_name="Infernal Reign",
+            source_card_id=charizard.id,
+            player_id=0,
+            phase=InterruptPhase.SEARCH_SELECT,
+            search_filter={
+                "energy_type": EnergyType.FIRE,
+                "subtype": Subtype.BASIC
+            },
+            max_select=3,
+            selected_card_ids=[],
+            cards_to_attach=[],
+        )
+        state.pending_interrupt = interrupt
+
+        # Select both energy cards
+        actions = engine.get_legal_actions(state)
+        select_actions = [a for a in actions if a.action_type == ActionType.SEARCH_SELECT_CARD]
+        assert len(select_actions) == 2, "Should have 2 energy cards to select"
+
+        # Select first energy
+        state = engine.step(state, select_actions[0])
+        # Select second energy
+        actions = engine.get_legal_actions(state)
+        select_actions = [a for a in actions if a.action_type == ActionType.SEARCH_SELECT_CARD]
+        state = engine.step(state, select_actions[0])
+
+        # Confirm selection
+        actions = engine.get_legal_actions(state)
+        confirm_actions = [a for a in actions if a.action_type == ActionType.SEARCH_CONFIRM]
+        assert len(confirm_actions) == 1, "Should have confirm action"
+        state = engine.step(state, confirm_actions[0])
+
+        # Verify we're now in ATTACH_ENERGY phase and card_definition_map is populated
+        assert state.pending_interrupt is not None
+        assert state.pending_interrupt.phase == InterruptPhase.ATTACH_ENERGY
+        assert len(state.pending_interrupt.card_definition_map) == 2, "Should have 2 cards in definition map"
+
+        # Attach first energy to Charizard
+        actions = engine.get_legal_actions(state)
+        attach_actions = [a for a in actions if a.action_type == ActionType.INTERRUPT_ATTACH_ENERGY]
+        charizard_attach = [a for a in attach_actions if a.target_id == charizard.id][0]
+        state = engine.step(state, charizard_attach)
+
+        # Attach second energy to Charizard
+        actions = engine.get_legal_actions(state)
+        attach_actions = [a for a in actions if a.action_type == ActionType.INTERRUPT_ATTACH_ENERGY]
+        charizard_attach = [a for a in attach_actions if a.target_id == charizard.id][0]
+        state = engine.step(state, charizard_attach)
+
+        # Interrupt should be complete now
+        assert state.pending_interrupt is None, "Interrupt should be complete"
+
+        # Verify Charizard has 2 energy attached
+        charizard = state.players[0].board.active_spot
+        assert len(charizard.attached_energy) == 2, "Charizard should have 2 energy attached"
+
+        # CRITICAL: Verify energy has correct card_id (not 'basic-fire-energy' fallback)
+        for energy in charizard.attached_energy:
+            assert energy.card_id == "sve-2", f"Energy should have correct card_id 'sve-2', got '{energy.card_id}'"
+
+        # Verify _calculate_provided_energy returns correct values
+        provided = engine._calculate_provided_energy(charizard)
+        assert provided.get('Fire', 0) == 2, f"Should have 2 Fire energy, got {provided}"
+
+    def test_burning_darkness_attack_available_after_infernal_reign(self, engine):
+        """
+        Burning Darkness attack should be available after attaching energy via Infernal Reign.
+
+        This is an integration test that verifies the full flow:
+        1. Evolve to Charizard ex (triggers Infernal Reign)
+        2. Attach 2+ Fire Energy
+        3. Attack with Burning Darkness
+        """
+        from models import SearchAndAttachState, InterruptPhase, EnergyType, Subtype
+
+        # Setup: Charizard ex with no energy
+        player0 = PlayerState(player_id=0, name='Player 0')
+        player1 = PlayerState(player_id=1, name='Player 1')
+
+        charizard = create_card_instance("svp-56", owner_id=0)  # Charizard ex
+        player0.board.active_spot = charizard
+        player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=2,  # Not turn 1, so attacks allowed
+            active_player_index=0,
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+
+        # Without energy, Burning Darkness should NOT be available
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+        assert len(attack_actions) == 0, "No attack should be available without energy"
+
+        # Attach 2 Fire Energy directly (simulating post-Infernal Reign state)
+        fire_energy_1 = create_card_instance("sve-2", owner_id=0)
+        fire_energy_2 = create_card_instance("sve-2", owner_id=0)
+        charizard.attached_energy = [fire_energy_1, fire_energy_2]
+
+        # Now Burning Darkness should be available
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+        assert len(attack_actions) == 1, f"Burning Darkness should be available, got {len(attack_actions)} attacks"
+        assert attack_actions[0].attack_name == "Burning Darkness", f"Attack should be Burning Darkness, got {attack_actions[0].attack_name}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

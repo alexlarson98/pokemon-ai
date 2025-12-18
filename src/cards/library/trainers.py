@@ -90,8 +90,14 @@ def rare_candy_actions(state: GameState, card: CardInstance, player: PlayerState
     The actual selection happens through SelectFromZoneStep.
 
     Branching Factor: 1 (initial) + N basics + M stage2s (sequential)
+
+    Note: Rare Candy cannot be played on the first turn (turn_count == 1).
     """
     from cards.utils import find_stage_2_chain_for_basic, get_valid_basics_for_rare_candy
+
+    # Rare Candy cannot be played on turn 1
+    if state.turn_count <= 1:
+        return []
 
     valid_basics = get_valid_basics_for_rare_candy(state, player)
     if not valid_basics:

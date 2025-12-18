@@ -393,6 +393,87 @@ class TestUltraBallStackMechanics:
         assert len(select_actions) >= 1, "Should have search options after discard auto-confirms"
         assert len(confirm_actions) == 1, "Should have confirm option (to fail search)"
 
+    def test_ultra_ball_excludes_itself_from_discard_options(self, engine, basic_game_state):
+        """Ultra Ball being played should NOT appear as a discard option (single Ultra Ball case)."""
+        state = basic_game_state
+        state = engine.initialize_deck_knowledge(state)
+        player = state.players[0]
+
+        # Clear hand and set up exactly: Ultra Ball + 2 other cards
+        player.hand.cards.clear()
+
+        ultra_ball = create_card_instance("sv1-196", owner_id=0)  # Ultra Ball
+        iono1 = create_card_instance("sv2-185", owner_id=0)        # Iono (Supporter)
+        iono2 = create_card_instance("sv2-185", owner_id=0)        # Iono (Supporter)
+
+        player.hand.add_card(ultra_ball)
+        player.hand.add_card(iono1)
+        player.hand.add_card(iono2)
+
+        # Get initial actions - should include PLAY_ITEM for Ultra Ball
+        actions = engine.get_legal_actions(state)
+        play_ultra_ball = [a for a in actions if a.action_type == ActionType.PLAY_ITEM and a.card_id == ultra_ball.id]
+        assert len(play_ultra_ball) == 1, "Should be able to play Ultra Ball"
+
+        # Play Ultra Ball through engine.step (this removes Ultra Ball from hand first)
+        state = engine.step(state, play_ultra_ball[0])
+
+        # Now we should be in the discard selection phase
+        assert state.has_pending_resolution()
+        step = state.get_current_step()
+        assert isinstance(step, SelectFromZoneStep)
+        assert step.purpose == SelectionPurpose.DISCARD_COST
+
+        # Get legal actions for discard selection
+        actions = engine.get_legal_actions(state)
+        select_actions = [a for a in actions if a.action_type == ActionType.SELECT_CARD]
+
+        # Should have exactly 2 options (the two Ionos), NOT Ultra Ball
+        assert len(select_actions) == 2, f"Should have 2 discard options, got {len(select_actions)}"
+
+        # Verify Ultra Ball is NOT among the options
+        select_card_ids = [a.card_id for a in select_actions]
+        assert ultra_ball.id not in select_card_ids, "Ultra Ball should NOT be a discard option"
+        assert iono1.id in select_card_ids, "Iono1 should be a discard option"
+        assert iono2.id in select_card_ids, "Iono2 should be a discard option"
+
+    def test_ultra_ball_with_two_ultra_balls_in_hand(self, engine, basic_game_state):
+        """With 2 Ultra Balls, the one NOT being played CAN be discarded."""
+        state = basic_game_state
+        state = engine.initialize_deck_knowledge(state)
+        player = state.players[0]
+
+        # Clear hand and set up: 2 Ultra Balls + 1 other card
+        player.hand.cards.clear()
+
+        ultra_ball_1 = create_card_instance("sv1-196", owner_id=0)  # Ultra Ball 1 (will play)
+        ultra_ball_2 = create_card_instance("sv1-196", owner_id=0)  # Ultra Ball 2 (can discard)
+        iono = create_card_instance("sv2-185", owner_id=0)           # Iono
+
+        player.hand.add_card(ultra_ball_1)
+        player.hand.add_card(ultra_ball_2)
+        player.hand.add_card(iono)
+
+        # Play Ultra Ball 1
+        actions = engine.get_legal_actions(state)
+        play_ultra_ball = [a for a in actions if a.action_type == ActionType.PLAY_ITEM and a.card_id == ultra_ball_1.id]
+        assert len(play_ultra_ball) == 1
+
+        state = engine.step(state, play_ultra_ball[0])
+
+        # Get legal actions for discard selection
+        actions = engine.get_legal_actions(state)
+        select_actions = [a for a in actions if a.action_type == ActionType.SELECT_CARD]
+
+        # Should have 2 options: Ultra Ball 2 and Iono
+        # (Ultra Ball 1 was removed from hand when played)
+        assert len(select_actions) == 2, f"Should have 2 discard options, got {len(select_actions)}"
+
+        select_card_ids = [a.card_id for a in select_actions]
+        assert ultra_ball_1.id not in select_card_ids, "Played Ultra Ball should NOT be a discard option"
+        assert ultra_ball_2.id in select_card_ids, "Second Ultra Ball CAN be discarded"
+        assert iono.id in select_card_ids, "Iono should be a discard option"
+
 
 # =============================================================================
 # BUDDY-BUDDY POFFIN STACK MECHANICS

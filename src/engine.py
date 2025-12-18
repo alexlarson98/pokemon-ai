@@ -151,8 +151,11 @@ class PokemonEngine:
         Generate actions for SearchAndAttachState interrupt.
 
         This handles multi-step abilities like Infernal Reign:
-        1. SEARCH_SELECT phase: Select cards from deck (up to max_select)
+        1. SELECT_COUNT phase: Choose how many cards to search (0, 1, 2, ... up to available)
         2. ATTACH_ENERGY phase: Choose target for each selected card
+
+        This design reduces branching factor for MCTS by collapsing the iterative
+        "select card, select card, confirm" flow into a single upfront count decision.
 
         Args:
             state: Current game state
@@ -168,15 +171,57 @@ class PokemonEngine:
         actions = []
         player = state.get_player(interrupt.player_id)
 
-        if interrupt.phase == InterruptPhase.SEARCH_SELECT:
-            # PHASE 1: Select cards from deck
-            # Player can select up to max_select cards matching the filter
+        if interrupt.phase == InterruptPhase.SELECT_COUNT:
+            # PHASE 1: Select how many cards to search (upfront count selection)
+            # This replaces the iterative select-confirm flow with a single decision
+
+            # Count how many cards in deck match the filter
+            matching_cards = []
+            for deck_card in player.deck.cards:
+                if self._card_matches_search_filter(deck_card, interrupt.search_filter):
+                    matching_cards.append(deck_card)
+
+            # Available count is min(max_select, cards_in_deck_matching_filter)
+            available_count = min(interrupt.max_select, len(matching_cards))
+
+            # Get a display name for the card type being searched
+            card_type_name = "card"
+            if matching_cards:
+                card_def = create_card(matching_cards[0].card_id)
+                if card_def:
+                    card_type_name = card_def.name
+
+            # Generate actions for each valid count (0 to available_count)
+            for count in range(available_count + 1):
+                if count == 0:
+                    label = f"Decline {interrupt.ability_name} (attach 0)"
+                else:
+                    label = f"Attach {count} {card_type_name}" if count == 1 else f"Attach {count} {card_type_name}"
+
+                actions.append(Action(
+                    action_type=ActionType.SEARCH_SELECT_COUNT,
+                    player_id=interrupt.player_id,
+                    choice_index=count,
+                    metadata={
+                        "ability_name": interrupt.ability_name,
+                        "source_card_id": interrupt.source_card_id,
+                        "selected_count": count
+                    },
+                    display_label=label
+                ))
+
+        elif interrupt.phase == InterruptPhase.SEARCH_SELECT:
+            # LEGACY PHASE: Iterative card selection (kept for backward compatibility)
+            # New code should use SELECT_COUNT phase instead
 
             # Get already selected count
             selected_count = len(interrupt.selected_card_ids)
 
             if selected_count < interrupt.max_select:
                 # Can still select more cards - show selectable options
+                # Deduplicate by card name (MCTS optimization - identical cards are equivalent)
+                seen_card_names = set()
+
                 for deck_card in player.deck.cards:
                     # Skip already selected cards
                     if deck_card.id in interrupt.selected_card_ids:
@@ -186,6 +231,11 @@ class PokemonEngine:
                     if self._card_matches_search_filter(deck_card, interrupt.search_filter):
                         card_def = create_card(deck_card.card_id)
                         card_name = card_def.name if card_def else deck_card.card_id
+
+                        # Only show one action per unique card name
+                        if card_name in seen_card_names:
+                            continue
+                        seen_card_names.add(card_name)
 
                         actions.append(Action(
                             action_type=ActionType.SEARCH_SELECT_CARD,
@@ -1688,6 +1738,8 @@ class PokemonEngine:
         elif action.action_type == ActionType.END_TURN:
             return self._apply_end_turn(state, action)
         # Interrupt Stack Actions
+        elif action.action_type == ActionType.SEARCH_SELECT_COUNT:
+            return self._apply_search_select_count(state, action)
         elif action.action_type == ActionType.SEARCH_SELECT_CARD:
             return self._apply_search_select_card(state, action)
         elif action.action_type == ActionType.SEARCH_CONFIRM:
@@ -2138,6 +2190,71 @@ class PokemonEngine:
     # 6b. INTERRUPT STACK ACTION HANDLERS
     # ========================================================================
 
+    def _apply_search_select_count(self, state: GameState, action: Action) -> GameState:
+        """
+        Handle selecting how many cards to search (upfront count selection).
+
+        This is used for abilities like Infernal Reign where the player chooses
+        how many matching cards to attach (0, 1, 2, 3) in a single decision,
+        rather than iteratively selecting cards one by one.
+
+        The selected count determines how many cards are automatically selected
+        from the deck and queued for attachment.
+        """
+        from actions import shuffle_deck
+
+        if state.pending_interrupt is None:
+            return state
+
+        interrupt = state.pending_interrupt
+        player = state.get_player(interrupt.player_id)
+
+        # Get the selected count from the action
+        selected_count = action.choice_index if action.choice_index is not None else 0
+
+        # If count is 0, decline the ability (same as legacy confirm with 0 selected)
+        if selected_count == 0:
+            # Mark has_searched_deck since player viewed deck
+            player.has_searched_deck = True
+            # Shuffle deck
+            state = shuffle_deck(state, interrupt.player_id)
+            # Clear the interrupt
+            state.pending_interrupt = None
+            return state
+
+        # Find matching cards in deck and select the first N
+        matching_cards = []
+        for deck_card in player.deck.cards:
+            if self._card_matches_search_filter(deck_card, interrupt.search_filter):
+                matching_cards.append(deck_card)
+
+        # Select up to selected_count cards
+        cards_to_select = matching_cards[:selected_count]
+
+        # Store selected card IDs
+        interrupt.selected_card_ids = [card.id for card in cards_to_select]
+
+        # Move selected cards from deck to cards_to_attach list
+        interrupt.cards_to_attach = interrupt.selected_card_ids.copy()
+
+        # Remove selected cards from deck and store their definition IDs
+        for card_id in interrupt.selected_card_ids:
+            for i, deck_card in enumerate(player.deck.cards):
+                if deck_card.id == card_id:
+                    # Store the card definition ID before removing
+                    interrupt.card_definition_map[card_id] = deck_card.card_id
+                    player.deck.cards.pop(i)
+                    break
+
+        # Transition to ATTACH_ENERGY phase
+        interrupt.phase = InterruptPhase.ATTACH_ENERGY
+        interrupt.current_attach_index = 0
+
+        # Mark has_searched_deck since player viewed deck
+        player.has_searched_deck = True
+
+        return state
+
     def _apply_search_select_card(self, state: GameState, action: Action) -> GameState:
         """
         Handle selecting a card during search phase of an interrupt.
@@ -2185,10 +2302,12 @@ class PokemonEngine:
         # Cards are removed from deck and held in "limbo" for attachment
         interrupt.cards_to_attach = interrupt.selected_card_ids.copy()
 
-        # Remove selected cards from deck
+        # Remove selected cards from deck and store their definition IDs
         for card_id in interrupt.selected_card_ids:
             for i, deck_card in enumerate(player.deck.cards):
                 if deck_card.id == card_id:
+                    # Store the card definition ID before removing
+                    interrupt.card_definition_map[card_id] = deck_card.card_id
                     player.deck.cards.pop(i)
                     break
 
@@ -2261,9 +2380,12 @@ class PokemonEngine:
         During interrupt processing, cards are removed from deck but we need
         their definition IDs to create proper CardInstances.
         """
-        # Search through discard pile and other zones for the card
-        # In practice, we store this mapping in the interrupt or find it elsewhere
-        # For now, search all zones
+        # First check the interrupt's card_definition_map (populated when cards were removed from deck)
+        if state.pending_interrupt and hasattr(state.pending_interrupt, 'card_definition_map'):
+            if instance_id in state.pending_interrupt.card_definition_map:
+                return state.pending_interrupt.card_definition_map[instance_id]
+
+        # Fallback: Search through all zones for the card
         for player in state.players:
             for card in player.deck.cards:
                 if card.id == instance_id:
@@ -2275,8 +2397,9 @@ class PokemonEngine:
                 if card.id == instance_id:
                     return card.card_id
 
-        # Default fallback - should not happen in normal gameplay
-        return "basic-fire-energy"
+        # Final fallback - should not happen in normal gameplay
+        # Log warning since this indicates a bug
+        return "unknown-card"
 
     # ========================================================================
     # RESOLUTION STACK ACTION HANDLERS (New Sequential State Machine)

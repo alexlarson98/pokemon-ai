@@ -251,7 +251,7 @@ def charizard_ex_infernal_reign_hook(state: GameState, card: CardInstance, conte
         ability_name="Infernal Reign",
         source_card_id=card.id,
         player_id=player_id,
-        phase=InterruptPhase.SEARCH_SELECT,
+        phase=InterruptPhase.SELECT_COUNT,  # Use upfront count selection (optimized for MCTS)
         search_filter={
             "energy_type": EnergyType.FIRE,
             "subtype": Subtype.BASIC

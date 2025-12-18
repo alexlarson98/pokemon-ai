@@ -212,6 +212,14 @@ SV4PT5_LOGIC = {
             }
         }
     },
+    "sv4pt5-89": {  # Rare Candy
+        "actions": {
+            "play": {
+                "generator": rare_candy_actions,
+                "effect": rare_candy_effect,
+            }
+        }
+    },
     "sv4pt5-91": {  # Ultra Ball
         "actions": {
             "play": {
