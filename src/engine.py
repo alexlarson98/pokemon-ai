@@ -508,6 +508,12 @@ class PokemonEngine:
 
         Cards are deduplicated by functional ID so identical cards
         (e.g., two Charmanders with same stats) show as one option.
+
+        Knowledge Layer:
+        - If has_searched_deck=False: Generate options based on theoretical deck
+          contents (initial_deck_counts minus known cards). This respects
+          imperfect information - player doesn't know what's prized.
+        - If has_searched_deck=True: Use actual deck contents (perfect knowledge).
         """
         from models import ActionType
         from cards.registry import create_card
@@ -515,58 +521,70 @@ class PokemonEngine:
 
         actions = []
 
-        # Search through deck
-        available_cards = [
-            card for card in player.deck.cards
-            if card.id not in step.selected_card_ids
-            and self._card_matches_step_filter(card, step.filter_criteria, state, player)
-        ]
-
         # Calculate remaining selections
         remaining_selections = step.count - len(step.selected_card_ids)
 
-        # Generate SELECT_CARD action for each searchable card (only if we can still select more)
-        if remaining_selections > 0:
-            # Deduplicate by functional ID so identical cards show as one option
-            seen_functional_ids = set()
-            deduplicated_cards = []
-            for card in available_cards:
-                # Use functional_id_map if available, otherwise compute
-                functional_id = player.functional_id_map.get(card.card_id)
-                if not functional_id:
-                    card_def = create_card(card.card_id)
-                    if card_def:
-                        if isinstance(card_def, PokemonCard):
-                            functional_id = self._compute_functional_id(card_def)
-                        else:
-                            functional_id = card_def.name if hasattr(card_def, 'name') else card.card_id
-                    else:
-                        functional_id = card.card_id
+        if remaining_selections <= 0:
+            # No more selections allowed, just add confirm if valid
+            if len(step.selected_card_ids) >= step.min_count:
+                actions.append(self._create_confirm_action(state, step, player))
+            return actions
 
-                if functional_id not in seen_functional_ids:
-                    seen_functional_ids.add(functional_id)
-                    deduplicated_cards.append(card)
+        # Determine available cards based on knowledge state
+        if player.has_searched_deck or not player.initial_deck_counts:
+            # Perfect knowledge: use actual deck contents
+            available_cards = [
+                card for card in player.deck.cards
+                if card.id not in step.selected_card_ids
+                and self._card_matches_step_filter(card, step.filter_criteria, state, player)
+            ]
+        else:
+            # Imperfect knowledge: generate options from theoretical deck contents
+            # Player knows initial_deck_counts but doesn't know which cards are prized
+            available_cards = self._get_theoretical_deck_cards(
+                player, step, state
+            )
 
-            for card in deduplicated_cards:
+        # Deduplicate by functional ID so identical cards show as one option
+        seen_functional_ids = set()
+        deduplicated_cards = []
+        for card in available_cards:
+            # Use functional_id_map if available, otherwise compute
+            functional_id = player.functional_id_map.get(card.card_id)
+            if not functional_id:
                 card_def = create_card(card.card_id)
-                card_name = card_def.name if card_def else card.card_id
+                if card_def:
+                    if isinstance(card_def, PokemonCard):
+                        functional_id = self._compute_functional_id(card_def)
+                    else:
+                        functional_id = card_def.name if hasattr(card_def, 'name') else card.card_id
+                else:
+                    functional_id = card.card_id
 
-                selection_num = len(step.selected_card_ids) + 1
+            if functional_id not in seen_functional_ids:
+                seen_functional_ids.add(functional_id)
+                deduplicated_cards.append(card)
 
-                actions.append(Action(
-                    action_type=ActionType.SELECT_CARD,
-                    player_id=player.player_id,
-                    card_id=card.id,
-                    metadata={
-                        "step_type": step.step_type.value,
-                        "purpose": step.purpose.value,
-                        "selection_number": selection_num,
-                        "max_selections": step.count,
-                        "source_card": step.source_card_name,
-                        "destination": step.destination.value
-                    },
-                    display_label=f"{step.source_card_name}: Search {card_name} ({selection_num}/{step.count})"
-                ))
+        for card in deduplicated_cards:
+            card_def = create_card(card.card_id)
+            card_name = card_def.name if card_def else card.card_id
+
+            selection_num = len(step.selected_card_ids) + 1
+
+            actions.append(Action(
+                action_type=ActionType.SELECT_CARD,
+                player_id=player.player_id,
+                card_id=card.id,
+                metadata={
+                    "step_type": step.step_type.value,
+                    "purpose": step.purpose.value,
+                    "selection_number": selection_num,
+                    "max_selections": step.count,
+                    "source_card": step.source_card_name,
+                    "destination": step.destination.value
+                },
+                display_label=f"{step.source_card_name}: Search {card_name} ({selection_num}/{step.count})"
+            ))
 
         # Add CONFIRM_SELECTION action (can always confirm search, even with 0 results)
         if len(step.selected_card_ids) >= step.min_count:
@@ -578,6 +596,92 @@ class PokemonEngine:
             pass
 
         return actions
+
+    def _get_theoretical_deck_cards(
+        self,
+        player: 'PlayerState',
+        step: 'SearchDeckStep',
+        state: 'GameState'
+    ) -> List['CardInstance']:
+        """
+        Generate theoretical deck contents based on imperfect information.
+
+        Uses FUNCTIONAL IDs to distinguish between different card versions:
+        - Pidgey 50HP and Pidgey 60HP are functionally different
+        - Both should appear as separate options in search
+
+        Logic:
+        - Player knows initial_deck_counts (keyed by functional ID)
+        - Player knows cards in hand (visible)
+        - Available = initial_deck_counts minus cards in hand (by functional ID)
+
+        The player doesn't know which cards are in deck vs prizes, so we show
+        ALL cards that COULD be in the deck. If they select a prized card,
+        the search fails but they gain knowledge of deck/prize contents.
+
+        Returns CardInstance objects from deck+prizes combined, with one
+        representative per unique FUNCTIONAL ID.
+        """
+        from cards.registry import create_card
+        from cards.base import PokemonCard
+        from collections import Counter
+
+        # Count cards in hand by FUNCTIONAL ID
+        hand_counts = Counter()
+        for card in player.hand.cards:
+            functional_id = player.functional_id_map.get(card.card_id)
+            if not functional_id:
+                # Compute it if not in map
+                card_def = create_card(card.card_id)
+                if isinstance(card_def, PokemonCard):
+                    functional_id = self._compute_functional_id(card_def)
+                else:
+                    functional_id = card_def.name if card_def else card.card_id
+            hand_counts[functional_id] += 1
+
+        # Calculate theoretical available counts by FUNCTIONAL ID
+        # Available = initial_deck_counts - hand_counts
+        theoretical_counts = {}
+        for functional_id, initial_count in player.initial_deck_counts.items():
+            available = initial_count - hand_counts.get(functional_id, 0)
+            if available > 0:
+                theoretical_counts[functional_id] = available
+
+        # Now find actual card instances from deck+prizes that match theoretical availability
+        # We need real CardInstance objects so SELECT_CARD actions have valid card IDs
+        result = []
+        seen_functional_ids = set()
+
+        # Combine deck and prizes - these are the "hidden zone"
+        hidden_cards = list(player.deck.cards) + list(player.prizes.cards)
+
+        for card in hidden_cards:
+            if card.id in step.selected_card_ids:
+                continue
+
+            # Get functional ID for this card
+            functional_id = player.functional_id_map.get(card.card_id)
+            if not functional_id:
+                card_def = create_card(card.card_id)
+                if isinstance(card_def, PokemonCard):
+                    functional_id = self._compute_functional_id(card_def)
+                else:
+                    functional_id = card_def.name if card_def else card.card_id
+
+            # Only include if this functional ID is in theoretical available
+            if functional_id not in theoretical_counts:
+                continue
+
+            # Only include if matches filter criteria
+            if not self._card_matches_step_filter(card, step.filter_criteria, state, player):
+                continue
+
+            # Only add one representative per FUNCTIONAL ID
+            if functional_id not in seen_functional_ids:
+                seen_functional_ids.add(functional_id)
+                result.append(card)
+
+        return result
 
     def _get_attach_to_target_actions(
         self,
@@ -1602,26 +1706,27 @@ class PokemonEngine:
                     all_player_cards.extend(pokemon.attached_energy)
                     all_player_cards.extend(pokemon.attached_tools)
 
-            # Count all cards
+            # Count all cards by FUNCTIONAL ID (not just name)
+            # This ensures Pidgey 50HP and Pidgey 60HP are tracked separately
             for card in all_player_cards:
                 if card is None:
                     continue
 
                 card_def = create_card(card.card_id)
-                card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
-                # Count by name for belief engine
-                if card_name in card_counts:
-                    card_counts[card_name] += 1
-                else:
-                    card_counts[card_name] = 1
-
-                # Compute functional ID for action generation
+                # Compute functional ID for this card
                 if isinstance(card_def, PokemonCard):
                     functional_id = self._compute_functional_id(card_def)
                 else:
                     # Non-Pokemon cards: use name as functional ID
+                    card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
                     functional_id = card_name
+
+                # Count by functional ID (not just name)
+                if functional_id in card_counts:
+                    card_counts[functional_id] += 1
+                else:
+                    card_counts[functional_id] = 1
 
                 # Map this card instance to its functional ID
                 functional_map[card.card_id] = functional_id
@@ -2166,6 +2271,14 @@ class PokemonEngine:
                 # Architecture Fix: Pass attacker as killer for prize calculation (Briar, Iron Hands ex, etc.)
                 state = self._handle_knockout(state, defender, player, killer=attacker)
 
+        # Check if attack pushed steps onto resolution stack (e.g., Call for Family search)
+        # If so, stay in MAIN phase to process the stack before advancing to CLEANUP
+        if state.resolution_stack:
+            # Stack-based attack effect - don't advance to CLEANUP yet
+            # Set flag so _apply_confirm_selection knows to advance to CLEANUP when stack clears
+            state.attack_resolution_pending = True
+            return state
+
         # Advance to Cleanup phase
         state.current_phase = GamePhase.CLEANUP
         return state
@@ -2520,6 +2633,11 @@ class PokemonEngine:
         if step.on_complete_callback:
             state = self._handle_step_callback(state, step)
 
+        # If stack is now empty and this was attack-initiated, advance to CLEANUP
+        if not state.resolution_stack and state.attack_resolution_pending:
+            state.attack_resolution_pending = False
+            state.current_phase = GamePhase.CLEANUP
+
         return state
 
     def _apply_cancel_action(self, state: GameState, action: Action) -> GameState:
@@ -2532,6 +2650,12 @@ class PokemonEngine:
         # For now, simply clear the resolution stack
         # In the future, we may want to validate whether cancellation is allowed
         state.clear_resolution_stack()
+
+        # If canceling an attack-initiated stack, advance to CLEANUP
+        if state.attack_resolution_pending:
+            state.attack_resolution_pending = False
+            state.current_phase = GamePhase.CLEANUP
+
         return state
 
     def _execute_select_from_zone(self, state: GameState, step, player) -> GameState:
@@ -2581,6 +2705,11 @@ class PokemonEngine:
         - HAND: Move to hand
         - BENCH: Put Basic Pokemon onto bench
         - DISCARD: Move to discard pile
+
+        Knowledge Layer:
+        If a selected card is not in the deck (it's prized), the search for
+        that card fails silently. The player still gains knowledge that they've
+        searched the deck (has_searched_deck = True).
         """
         from models import ZoneType, SearchDeckStep
         from actions import shuffle_deck
@@ -2589,14 +2718,16 @@ class PokemonEngine:
             return state
 
         # Remove selected cards from deck
+        # Cards that are prized won't be found - search fails for those
         selected_cards = []
         for card_id in step.selected_card_ids:
             for i, deck_card in enumerate(player.deck.cards):
                 if deck_card.id == card_id:
                     selected_cards.append(player.deck.cards.pop(i))
                     break
+            # If card not found, it's prized - search fails silently for that card
 
-        # Move to destination
+        # Move found cards to destination
         if step.destination == ZoneType.HAND:
             for card in selected_cards:
                 player.hand.add_card(card)
@@ -2614,7 +2745,8 @@ class PokemonEngine:
         if step.shuffle_after:
             state = shuffle_deck(state, step.player_id)
 
-        # Mark that player has searched deck this turn
+        # Mark that player has searched deck - they now have perfect knowledge
+        # This happens whether or not they found their cards
         player.has_searched_deck = True
 
         return state

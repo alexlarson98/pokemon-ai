@@ -315,9 +315,9 @@ class PlayerState(BaseModel):
     initial_deck_counts: Dict[str, int] = Field(
         default_factory=dict,
         description=(
-            "Name-based card counts capturing all 60 cards at game start. "
-            "Used by belief engine for ISMCTS - player doesn't know which functional "
-            "versions exist, only card names. Example: {'Charmander': 2, 'Fire Energy': 12}"
+            "Functional ID-based card counts capturing all 60 cards at game start. "
+            "Keyed by functional ID (name|hp|subtypes|attacks|abilities for Pokemon, "
+            "name for non-Pokemon). Example: {'Pidgey|60|Basic|Peck:20|': 2, 'Pidgey|50|Basic|Gust:10|': 2}"
         )
     )
     functional_id_map: Dict[str, str] = Field(
@@ -416,6 +416,14 @@ class GameState(BaseModel):
     pending_interrupt: Optional['SearchAndAttachState'] = Field(
         None,
         description="LEGACY: Active interrupt state for multi-step abilities (e.g., Infernal Reign)"
+    )
+
+    # Attack-initiated stack tracking
+    # When an attack pushes steps onto resolution_stack, this flag is set.
+    # After stack clears, phase advances to CLEANUP.
+    attack_resolution_pending: bool = Field(
+        False,
+        description="True when attack pushed steps onto resolution_stack (advance to CLEANUP when stack clears)"
     )
 
     @field_validator('players')
