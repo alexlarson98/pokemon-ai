@@ -10,6 +10,15 @@ from models import GameState, CardInstance, Action, ActionType, PlayerState, Sub
 from actions import apply_damage, calculate_damage, shuffle_deck
 from cards.utils import get_deck_search_candidates, resolve_search_target
 from cards.factory import get_card_definition
+from cards.base import PokemonCard
+
+# Import Charizard ex Version 3 logic from svp (first release)
+from .svp import (
+    charizard_ex_brave_wing_actions,
+    charizard_ex_brave_wing_effect,
+    charizard_ex_explosive_vortex_actions,
+    charizard_ex_explosive_vortex_effect,
+)
 
 
 # ============================================================================
@@ -327,9 +336,10 @@ def pidgey_call_for_family_actions(state: GameState, card: CardInstance, player:
             display_label="Call for Family (deck empty)"
         )]
 
-    # Define criteria for Basic Pokémon
+    # Define criteria for Basic Pokémon (not Basic Energy)
     def is_basic(card_def):
-        return card_def and hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes
+        return (card_def and isinstance(card_def, PokemonCard) and
+                hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes)
 
     # Get searchable candidates
     candidate_names = get_deck_search_candidates(state, player, is_basic)
@@ -437,7 +447,8 @@ def pidgey_call_for_family_effect(state: GameState, card: CardInstance, action: 
     for target_id in target_ids:
         # Resolve the target (handles both regular and belief-based IDs)
         def is_basic(card_def):
-            return card_def and hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes
+            return (card_def and isinstance(card_def, PokemonCard) and
+                    hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes)
 
         target_card = resolve_search_target(player, target_id, is_basic)
 
@@ -572,6 +583,38 @@ SV3PT5_LOGIC = {
         "Tackle": {
             "generator": pidgey_tackle_actions,
             "effect": pidgey_tackle_effect,
+        },
+    },
+
+    # Charizard ex - Version 3 (Brave Wing + Explosive Vortex)
+    "sv3pt5-6": {
+        "Brave Wing": {
+            "generator": charizard_ex_brave_wing_actions,
+            "effect": charizard_ex_brave_wing_effect,
+        },
+        "Explosive Vortex": {
+            "generator": charizard_ex_explosive_vortex_actions,
+            "effect": charizard_ex_explosive_vortex_effect,
+        },
+    },
+    "sv3pt5-183": {
+        "Brave Wing": {
+            "generator": charizard_ex_brave_wing_actions,
+            "effect": charizard_ex_brave_wing_effect,
+        },
+        "Explosive Vortex": {
+            "generator": charizard_ex_explosive_vortex_actions,
+            "effect": charizard_ex_explosive_vortex_effect,
+        },
+    },
+    "sv3pt5-199": {
+        "Brave Wing": {
+            "generator": charizard_ex_brave_wing_actions,
+            "effect": charizard_ex_brave_wing_effect,
+        },
+        "Explosive Vortex": {
+            "generator": charizard_ex_explosive_vortex_actions,
+            "effect": charizard_ex_explosive_vortex_effect,
         },
     },
 }

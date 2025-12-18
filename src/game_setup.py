@@ -228,9 +228,9 @@ def _handle_mulligans(state: GameState, max_mulligans: int = 5):
         mulligan_count = 0
 
         while mulligan_count < max_mulligans:
-            # Check for Basic Pokémon in hand
+            # Check for Basic Pokémon in hand (not Basic Energy)
             has_basic = any(
-                Subtype.BASIC in _get_card_subtypes(card)
+                _is_basic_pokemon(card)
                 for card in player.hand.cards
             )
 
@@ -273,10 +273,10 @@ def _place_initial_pokemon(state: GameState):
     from models import Subtype
 
     for player in state.players:
-        # Find first Basic Pokémon in hand
+        # Find first Basic Pokémon in hand (not Basic Energy)
         basic_pokemon = [
             card for card in player.hand.cards
-            if Subtype.BASIC in _get_card_subtypes(card)
+            if _is_basic_pokemon(card)
         ]
 
         if not basic_pokemon:
@@ -321,6 +321,26 @@ def _get_card_subtypes(card: CardInstance) -> List:
     if card_def and hasattr(card_def, 'subtypes'):
         return card_def.subtypes
     return []
+
+
+def _is_basic_pokemon(card: CardInstance) -> bool:
+    """
+    Check if a card is a Basic Pokemon (not Basic Energy).
+
+    Args:
+        card: CardInstance to check
+
+    Returns:
+        True if card is a Basic Pokemon, False otherwise
+    """
+    from cards.registry import create_card
+    from cards.base import PokemonCard
+    from models import Subtype
+
+    card_def = create_card(card.card_id)
+    if card_def and isinstance(card_def, PokemonCard):
+        return Subtype.BASIC in card_def.subtypes
+    return False
 
 
 # ============================================================================

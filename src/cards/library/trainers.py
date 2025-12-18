@@ -462,9 +462,10 @@ def buddy_buddy_poffin_actions(state: GameState, card: CardInstance, player: Pla
     if bench_space <= 0 or player.deck.is_empty():
         return actions
 
-    # Define search criteria: Basic Pokémon with HP ≤ 70
+    # Define search criteria: Basic Pokémon with HP ≤ 70 (not Basic Energy)
     def is_basic_hp_70_or_less(card_def):
-        return (hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes and
+        return (isinstance(card_def, PokemonCard) and
+                hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes and
                 hasattr(card_def, 'hp') and card_def.hp <= 70)
 
     # Use the shared utility to generate actions (count=2 for single + pair actions)
@@ -515,9 +516,11 @@ def nest_ball_actions(state: GameState, card: CardInstance, player: PlayerState)
     if bench_space <= 0 or player.deck.is_empty():
         return actions
 
-    # Define search criteria: Basic Pokémon
+    # Define search criteria: Basic Pokémon (not Basic Energy)
     def is_basic(card_def):
-        return hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes
+        return (isinstance(card_def, PokemonCard) and
+                hasattr(card_def, 'subtypes') and
+                Subtype.BASIC in card_def.subtypes)
 
     # Use the shared utility to generate actions
     actions = generate_search_actions(

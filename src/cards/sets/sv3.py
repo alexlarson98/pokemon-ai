@@ -13,6 +13,13 @@ from actions import apply_damage, calculate_damage
 # Import Charmander Version 1 logic from svp (first release)
 from .svp import charmander_heat_tackle_actions, charmander_heat_tackle_effect
 
+# Import Charizard ex Version 1/2/4 logic from svp (first release)
+from .svp import (
+    charizard_ex_infernal_reign_hook,
+    charizard_ex_burning_darkness_actions,
+    charizard_ex_burning_darkness_effect,
+)
+
 
 # ============================================================================
 # CHARMELEON - VERSION 1: HEAT TACKLE (sv3-27)
@@ -185,6 +192,44 @@ SV3_LOGIC = {
         "Gust": {
             "generator": pidgey_gust_actions,
             "effect": pidgey_gust_effect,
+        },
+    },
+
+    # Charizard ex - Version 4 (Infernal Reign + Burning Darkness)
+    "sv3-125": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-215": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-223": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-228": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
         },
     },
 }

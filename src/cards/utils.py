@@ -345,6 +345,51 @@ def generate_search_actions(
                     deck_cards_by_functional_id[functional_id].append(card_instance)
         elif not player.has_searched_deck:
             # ISMCTS: Belief says card might be searchable but it's not in deck
+            # Only create placeholder if we can verify the card COULD pass criteria
+            # (card might be in prizes - but we should verify it's the right type)
+            #
+            # Try to find ANY card with this name to check criteria
+            # Search in order: deck, visible zones, functional_id_map
+            sample_card_def = None
+
+            # 1. Check deck (most likely location)
+            for card in player.deck.cards:
+                card_def = get_card_definition(card)
+                if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
+                    sample_card_def = card_def
+                    break
+
+            # 2. Check visible zones if not found in deck
+            if not sample_card_def:
+                visible_zones = [
+                    player.hand.cards,
+                    player.discard.cards,
+                    player.board.get_all_pokemon(),
+                ]
+                for zone in visible_zones:
+                    for card in zone:
+                        if card is None:
+                            continue
+                        card_def = get_card_definition(card)
+                        if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
+                            sample_card_def = card_def
+                            break
+                    if sample_card_def:
+                        break
+
+            # 3. Check functional_id_map for any card_id that might give us the definition
+            if not sample_card_def:
+                for card_id, _ in player.functional_id_map.items():
+                    from cards.registry import create_card
+                    card_def = create_card(card_id)
+                    if card_def and hasattr(card_def, 'name') and card_def.name == card_name:
+                        sample_card_def = card_def
+                        break
+
+            # If we found a sample and it doesn't pass criteria, skip this belief
+            if sample_card_def and not criteria(sample_card_def):
+                continue  # Skip - this card type can never pass the criteria
+
             # Create placeholder for belief-based action (card likely in prizes)
             deck_cards_by_functional_id[card_name] = [None]
 

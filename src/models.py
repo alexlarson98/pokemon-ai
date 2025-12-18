@@ -404,6 +404,12 @@ class GameState(BaseModel):
     random_seed: Optional[int] = Field(None, description="RNG seed for deterministic simulation")
     move_history: List[str] = Field(default_factory=list, description="Action history for replay")
 
+    # Interrupt Stack (for multi-step ability resolution)
+    pending_interrupt: Optional['SearchAndAttachState'] = Field(
+        None,
+        description="Active interrupt state for multi-step abilities (e.g., Infernal Reign)"
+    )
+
     @field_validator('players')
     @classmethod
     def validate_players(cls, v):
@@ -440,7 +446,53 @@ class GameState(BaseModel):
 
 
 # ============================================================================
-# 7. ACTION REPRESENTATION
+# 7. INTERRUPT STACK STATES (Multi-step ability resolution)
+# ============================================================================
+
+class InterruptPhase(str, Enum):
+    """Phases for multi-step interrupt resolution."""
+    SEARCH_SELECT = "search_select"     # Selecting cards from deck search
+    ATTACH_ENERGY = "attach_energy"     # Choosing where to attach energy
+
+
+class SearchAndAttachState(BaseModel):
+    """
+    Interrupt state for search-and-attach abilities like Infernal Reign.
+
+    This enables MCTS to break down complex abilities into atomic choices:
+    1. Search phase: Select up to N cards from deck
+    2. Attach phase: Choose target for each selected card (one at a time)
+
+    Example Flow (Infernal Reign):
+    - Phase 1: Select 0-3 Fire Energy from deck
+    - Phase 2: Attach Energy 1 to [target choices]
+    - Phase 3: Attach Energy 2 to [target choices]
+    - Phase 4: Attach Energy 3 to [target choices]
+    - Complete: Shuffle deck, resume normal gameplay
+    """
+    # Identity
+    ability_name: str = Field(..., description="Name of ability (e.g., 'Infernal Reign')")
+    source_card_id: str = Field(..., description="Card ID that triggered this ability")
+    player_id: int = Field(..., description="Player who controls this ability")
+
+    # Current phase
+    phase: InterruptPhase = Field(InterruptPhase.SEARCH_SELECT, description="Current interrupt phase")
+
+    # Search parameters
+    search_filter: Dict = Field(default_factory=dict, description="Filter for searchable cards (e.g., {'energy_type': 'Fire', 'subtype': 'Basic'})")
+    max_select: int = Field(3, description="Maximum cards that can be selected")
+
+    # State tracking
+    selected_card_ids: List[str] = Field(default_factory=list, description="Cards selected during search phase")
+    cards_to_attach: List[str] = Field(default_factory=list, description="Remaining cards to attach (in order)")
+    current_attach_index: int = Field(0, description="Index of current card being attached")
+
+    # Completion flag
+    is_complete: bool = Field(False, description="Whether all steps are done")
+
+
+# ============================================================================
+# 8. ACTION REPRESENTATION
 # ============================================================================
 
 class ActionType(str, Enum):
@@ -469,6 +521,11 @@ class ActionType(str, Enum):
     # Reactions
     TAKE_PRIZE = "take_prize"
     PROMOTE_ACTIVE = "promote_active"
+
+    # Interrupt Stack Actions (Multi-step ability resolution)
+    SEARCH_SELECT_CARD = "search_select_card"     # Select a card during search phase
+    SEARCH_CONFIRM = "search_confirm"             # Confirm search selection (done selecting)
+    INTERRUPT_ATTACH_ENERGY = "interrupt_attach_energy"  # Attach energy during interrupt
 
     # Chance
     COIN_FLIP = "coin_flip"

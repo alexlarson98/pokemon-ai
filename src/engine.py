@@ -18,6 +18,8 @@ from models import (
     CardInstance,
     StatusCondition,
     Subtype,
+    SearchAndAttachState,
+    InterruptPhase,
 )
 from cards import logic_registry
 
@@ -97,9 +99,15 @@ class PokemonEngine:
         - Active Pokémon KO'd -> Must promote from bench
         - Bench > max_size -> Must discard Pokémon
         - Prize card selection (if applicable)
+        - SearchAndAttachState -> Multi-step ability resolution (e.g., Infernal Reign)
         """
         player = state.get_active_player()
         actions = []
+
+        # INTERRUPT 0: SearchAndAttachState (Highest priority - ability in progress)
+        if state.pending_interrupt is not None:
+            interrupt = state.pending_interrupt
+            return self._get_search_and_attach_actions(state, interrupt)
 
         # INTERRUPT 1: Must promote new Active (Constitution Section 2, Phase 3)
         if not player.has_active_pokemon() and player.board.get_bench_count() > 0:
@@ -129,6 +137,158 @@ class PokemonEngine:
 
         return []
 
+    def _get_search_and_attach_actions(self, state: GameState, interrupt: SearchAndAttachState) -> List[Action]:
+        """
+        Generate actions for SearchAndAttachState interrupt.
+
+        This handles multi-step abilities like Infernal Reign:
+        1. SEARCH_SELECT phase: Select cards from deck (up to max_select)
+        2. ATTACH_ENERGY phase: Choose target for each selected card
+
+        Args:
+            state: Current game state
+            interrupt: The SearchAndAttachState tracking this ability
+
+        Returns:
+            List of legal actions for current interrupt phase
+        """
+        from cards.registry import create_card
+        from cards.base import EnergyCard
+        from models import EnergyType
+
+        actions = []
+        player = state.get_player(interrupt.player_id)
+
+        if interrupt.phase == InterruptPhase.SEARCH_SELECT:
+            # PHASE 1: Select cards from deck
+            # Player can select up to max_select cards matching the filter
+
+            # Get already selected count
+            selected_count = len(interrupt.selected_card_ids)
+
+            if selected_count < interrupt.max_select:
+                # Can still select more cards - show selectable options
+                for deck_card in player.deck.cards:
+                    # Skip already selected cards
+                    if deck_card.id in interrupt.selected_card_ids:
+                        continue
+
+                    # Check if card matches filter
+                    if self._card_matches_search_filter(deck_card, interrupt.search_filter):
+                        card_def = create_card(deck_card.card_id)
+                        card_name = card_def.name if card_def else deck_card.card_id
+
+                        actions.append(Action(
+                            action_type=ActionType.SEARCH_SELECT_CARD,
+                            player_id=interrupt.player_id,
+                            card_id=deck_card.id,
+                            metadata={
+                                "ability_name": interrupt.ability_name,
+                                "source_card_id": interrupt.source_card_id
+                            },
+                            display_label=f"Select {card_name} ({selected_count + 1}/{interrupt.max_select})"
+                        ))
+
+            # Always allow confirming selection (even with 0 selected - "decline" option)
+            if selected_count == 0:
+                confirm_label = f"Decline {interrupt.ability_name} (select 0 cards)"
+            else:
+                confirm_label = f"Confirm selection ({selected_count} card{'s' if selected_count != 1 else ''})"
+
+            actions.append(Action(
+                action_type=ActionType.SEARCH_CONFIRM,
+                player_id=interrupt.player_id,
+                metadata={
+                    "ability_name": interrupt.ability_name,
+                    "source_card_id": interrupt.source_card_id,
+                    "selected_count": selected_count
+                },
+                display_label=confirm_label
+            ))
+
+        elif interrupt.phase == InterruptPhase.ATTACH_ENERGY:
+            # PHASE 2: Attach each selected card to a target Pokemon
+            if interrupt.cards_to_attach:
+                current_card_id = interrupt.cards_to_attach[0]
+
+                # Find the card in the "limbo" (it's been removed from deck but not attached yet)
+                # For display purposes, get the card name
+                card_name = "Energy"
+                for deck_card in player.deck.cards:
+                    if deck_card.id == current_card_id:
+                        card_def = create_card(deck_card.card_id)
+                        card_name = card_def.name if card_def else "Energy"
+                        break
+
+                # Generate one action per valid target Pokemon
+                all_pokemon = player.board.get_all_pokemon()
+                attach_num = interrupt.current_attach_index + 1
+                total = len(interrupt.selected_card_ids)
+
+                for pokemon in all_pokemon:
+                    pokemon_def = create_card(pokemon.card_id)
+                    pokemon_name = pokemon_def.name if pokemon_def else pokemon.card_id
+
+                    actions.append(Action(
+                        action_type=ActionType.INTERRUPT_ATTACH_ENERGY,
+                        player_id=interrupt.player_id,
+                        card_id=current_card_id,
+                        target_id=pokemon.id,
+                        metadata={
+                            "ability_name": interrupt.ability_name,
+                            "source_card_id": interrupt.source_card_id,
+                            "attach_index": interrupt.current_attach_index
+                        },
+                        display_label=f"Attach {card_name} to {pokemon_name} ({attach_num}/{total})"
+                    ))
+
+        return actions
+
+    def _card_matches_search_filter(self, card: CardInstance, search_filter: Dict) -> bool:
+        """
+        Check if a card matches the search filter criteria.
+
+        Args:
+            card: CardInstance to check
+            search_filter: Dict with filter criteria (e.g., {'energy_type': 'Fire', 'subtype': 'Basic'})
+
+        Returns:
+            True if card matches all filter criteria
+        """
+        from cards.registry import create_card
+        from cards.base import EnergyCard
+        from models import EnergyType
+
+        card_def = create_card(card.card_id)
+        if not card_def:
+            return False
+
+        # Check energy_type filter
+        if 'energy_type' in search_filter:
+            if not isinstance(card_def, EnergyCard):
+                return False
+            required_type = search_filter['energy_type']
+            if hasattr(card_def, 'energy_type'):
+                if isinstance(required_type, str):
+                    required_type = EnergyType(required_type)
+                if card_def.energy_type != required_type:
+                    return False
+            else:
+                return False
+
+        # Check subtype filter (e.g., Basic energy)
+        if 'subtype' in search_filter:
+            required_subtype = search_filter['subtype']
+            if hasattr(card_def, 'subtypes'):
+                if isinstance(required_subtype, str):
+                    required_subtype = Subtype(required_subtype)
+                if required_subtype not in card_def.subtypes:
+                    return False
+            else:
+                return False
+
+        return True
+
     # ========================================================================
     # 3. PHASE-SPECIFIC ACTION GENERATION
     # ========================================================================
@@ -153,7 +313,7 @@ class PokemonEngine:
         unique_basic_pokemon = []
 
         for card in player.hand.cards:
-            if Subtype.BASIC in self._get_card_subtypes(card):
+            if self._is_basic_pokemon(card):
                 card_def = create_card(card.card_id)
                 card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
@@ -248,7 +408,7 @@ class PokemonEngine:
             seen_basic_names = set()
 
             for card in player.hand.cards:
-                if Subtype.BASIC in self._get_card_subtypes(card):
+                if self._is_basic_pokemon(card):
                     card_def = create_card(card.card_id)
                     card_name = card_def.name if card_def and hasattr(card_def, 'name') else card.card_id
 
@@ -1022,6 +1182,13 @@ class PokemonEngine:
             return self._apply_promote_active(state, action)
         elif action.action_type == ActionType.END_TURN:
             return self._apply_end_turn(state, action)
+        # Interrupt Stack Actions
+        elif action.action_type == ActionType.SEARCH_SELECT_CARD:
+            return self._apply_search_select_card(state, action)
+        elif action.action_type == ActionType.SEARCH_CONFIRM:
+            return self._apply_search_confirm(state, action)
+        elif action.action_type == ActionType.INTERRUPT_ATTACH_ENERGY:
+            return self._apply_interrupt_attach_energy(state, action)
         else:
             # Unknown action type
             return state
@@ -1425,6 +1592,150 @@ class PokemonEngine:
             player.board.active_spot = new_active
 
         return state
+
+    # ========================================================================
+    # 6b. INTERRUPT STACK ACTION HANDLERS
+    # ========================================================================
+
+    def _apply_search_select_card(self, state: GameState, action: Action) -> GameState:
+        """
+        Handle selecting a card during search phase of an interrupt.
+
+        This adds the selected card to the interrupt's selected_card_ids list.
+        The card remains in the deck until SEARCH_CONFIRM is executed.
+        """
+        if state.pending_interrupt is None:
+            return state
+
+        interrupt = state.pending_interrupt
+
+        # Add the selected card to the list
+        if action.card_id and action.card_id not in interrupt.selected_card_ids:
+            interrupt.selected_card_ids.append(action.card_id)
+
+        return state
+
+    def _apply_search_confirm(self, state: GameState, action: Action) -> GameState:
+        """
+        Handle confirming the search selection.
+
+        This transitions from SEARCH_SELECT phase to ATTACH_ENERGY phase,
+        or completes the interrupt if no cards were selected.
+        """
+        from actions import shuffle_deck
+
+        if state.pending_interrupt is None:
+            return state
+
+        interrupt = state.pending_interrupt
+        player = state.get_player(interrupt.player_id)
+
+        # If no cards selected, complete the interrupt (ability declined)
+        if not interrupt.selected_card_ids:
+            # Mark has_searched_deck since player viewed deck
+            player.has_searched_deck = True
+            # Shuffle deck
+            state = shuffle_deck(state, interrupt.player_id)
+            # Clear the interrupt
+            state.pending_interrupt = None
+            return state
+
+        # Move selected cards from deck to cards_to_attach list
+        # Cards are removed from deck and held in "limbo" for attachment
+        interrupt.cards_to_attach = interrupt.selected_card_ids.copy()
+
+        # Remove selected cards from deck
+        for card_id in interrupt.selected_card_ids:
+            for i, deck_card in enumerate(player.deck.cards):
+                if deck_card.id == card_id:
+                    player.deck.cards.pop(i)
+                    break
+
+        # Transition to ATTACH_ENERGY phase
+        interrupt.phase = InterruptPhase.ATTACH_ENERGY
+        interrupt.current_attach_index = 0
+
+        # Mark has_searched_deck since player viewed deck
+        player.has_searched_deck = True
+
+        return state
+
+    def _apply_interrupt_attach_energy(self, state: GameState, action: Action) -> GameState:
+        """
+        Handle attaching an energy card during interrupt attach phase.
+
+        This attaches the current card to the target Pokemon and advances
+        to the next card, or completes the interrupt if all cards attached.
+        """
+        from actions import shuffle_deck
+
+        if state.pending_interrupt is None:
+            return state
+
+        interrupt = state.pending_interrupt
+        player = state.get_player(interrupt.player_id)
+
+        # Find the target Pokemon
+        target = self._find_pokemon_by_id(player, action.target_id)
+        if not target:
+            return state
+
+        # The card to attach is the first in cards_to_attach
+        if not interrupt.cards_to_attach:
+            return state
+
+        card_id = interrupt.cards_to_attach.pop(0)
+
+        # Create a CardInstance for the energy (it was removed from deck in SEARCH_CONFIRM)
+        # We need to find it by id in the selected cards
+        from models import CardInstance
+
+        # Find the card's card_id (definition ID) from original deck search
+        # Since the card was removed from deck, we need to reconstruct it
+        # The action.card_id should match the card we're attaching
+        energy_card = CardInstance(
+            id=card_id,
+            card_id=self._get_card_definition_id_from_interrupt(state, card_id),
+            owner_id=interrupt.player_id
+        )
+
+        # Attach energy to target
+        target.attached_energy.append(energy_card)
+
+        # Advance to next card or complete interrupt
+        interrupt.current_attach_index += 1
+
+        if not interrupt.cards_to_attach:
+            # All cards attached, complete the interrupt
+            state = shuffle_deck(state, interrupt.player_id)
+            state.pending_interrupt = None
+        # else: more cards to attach, stay in ATTACH_ENERGY phase
+
+        return state
+
+    def _get_card_definition_id_from_interrupt(self, state: GameState, instance_id: str) -> str:
+        """
+        Get the card definition ID for a card instance ID from interrupt context.
+
+        During interrupt processing, cards are removed from deck but we need
+        their definition IDs to create proper CardInstances.
+        """
+        # Search through discard pile and other zones for the card
+        # In practice, we store this mapping in the interrupt or find it elsewhere
+        # For now, search all zones
+        for player in state.players:
+            for card in player.deck.cards:
+                if card.id == instance_id:
+                    return card.card_id
+            for card in player.discard.cards:
+                if card.id == instance_id:
+                    return card.card_id
+            for card in player.hand.cards:
+                if card.id == instance_id:
+                    return card.card_id
+
+        # Default fallback - should not happen in normal gameplay
+        return "basic-fire-energy"
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:
         """
@@ -2148,6 +2459,24 @@ class PokemonEngine:
         if card_def:
             return set(card_def.subtypes)
         return set()
+
+    def _is_basic_pokemon(self, card: CardInstance) -> bool:
+        """
+        Check if a card is a Basic Pokemon (not Basic Energy).
+
+        Args:
+            card: CardInstance to check
+
+        Returns:
+            True if card is a Basic Pokemon, False otherwise
+        """
+        from cards.factory import get_card_definition
+        from cards.base import PokemonCard
+
+        card_def = get_card_definition(card)
+        if card_def and isinstance(card_def, PokemonCard):
+            return Subtype.BASIC in card_def.subtypes
+        return False
 
     def _calculate_provided_energy(self, pokemon: CardInstance) -> Dict[str, int]:
         """

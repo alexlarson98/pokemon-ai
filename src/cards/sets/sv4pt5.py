@@ -30,6 +30,13 @@ from .sv3pt5 import (
     pidgey_tackle_effect
 )
 
+# Import Charizard ex Version 1/2 logic from svp (first release)
+from .svp import (
+    charizard_ex_infernal_reign_hook,
+    charizard_ex_burning_darkness_actions,
+    charizard_ex_burning_darkness_effect,
+)
+
 
 # ============================================================================
 # CHARMELEON - VERSION 3: COMBUSTION + FLARE VEIL (sv4pt5-8, sv4pt5-110)
@@ -223,6 +230,26 @@ SV4PT5_LOGIC = {
         "Tackle": {
             "generator": pidgey_tackle_actions,
             "effect": pidgey_tackle_effect,
+        },
+    },
+
+    # Charizard ex - Version 1/2 reprints (Infernal Reign + Burning Darkness)
+    "sv4pt5-54": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv4pt5-234": {
+        "Burning Darkness": {
+            "generator": charizard_ex_burning_darkness_actions,
+            "effect": charizard_ex_burning_darkness_effect,
+        },
+        "hooks": {
+            "on_evolve": charizard_ex_infernal_reign_hook,
         },
     },
 }

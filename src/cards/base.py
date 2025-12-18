@@ -608,7 +608,10 @@ class EnergyCard(Card):
             special_effect: Text description of special effect
         """
         from models import Subtype
-        subtypes = []
+        # Set subtypes based on is_basic flag
+        # Note: Subtype.BASIC is used for Basic Pokemon AND Basic Energy
+        # Special Energy doesn't have a Subtype entry, so we leave it empty
+        subtypes = [Subtype.BASIC] if is_basic else []
         super().__init__(card_id, name, subtypes)
 
         self.energy_type = energy_type
