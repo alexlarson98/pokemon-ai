@@ -130,6 +130,11 @@ def test_energy_once_per_turn(engine, basic_battle_state):
     Test that you cannot attach Energy twice in one turn.
 
     Constitution: "Attach Energy: Once per turn."
+
+    With stack-based attach energy, we need to complete the full flow:
+    1. ATTACH_ENERGY -> initiates stack
+    2. SELECT_CARD -> choose energy from hand (auto-confirms since exact_count=True)
+    3. SELECT_CARD -> choose target Pokemon (auto-executes)
     """
     state = basic_battle_state
     player = state.players[0]
@@ -144,9 +149,21 @@ def test_energy_once_per_turn(engine, basic_battle_state):
     actions_before = engine.get_legal_actions(state)
     assert_has_action_type(actions_before, ActionType.ATTACH_ENERGY)
 
-    # Attach first energy
+    # Step 1: Initiate attach energy (pushes SelectFromZoneStep)
     attach_action = next(a for a in actions_before if a.action_type == ActionType.ATTACH_ENERGY)
     state = engine.step(state, attach_action)
+
+    # Step 2: Select energy from hand (auto-confirms since exact_count=True, count=1)
+    select_actions = engine.get_legal_actions(state)
+    energy_select = next((a for a in select_actions if a.action_type == ActionType.SELECT_CARD), None)
+    assert energy_select is not None, "Should have SELECT_CARD for energy"
+    state = engine.step(state, energy_select)
+
+    # Step 3: Select target Pokemon (auto-executes)
+    target_actions = engine.get_legal_actions(state)
+    target_select = next((a for a in target_actions if a.action_type == ActionType.SELECT_CARD), None)
+    assert target_select is not None, "Should have SELECT_CARD for target"
+    state = engine.step(state, target_select)
 
     # Verify flag is set
     assert state.players[0].energy_attached_this_turn, "Energy attachment flag should be True"

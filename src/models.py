@@ -4,7 +4,7 @@ Defines the immutable "Snapshot" of the game universe.
 All models must be serializable (JSON) and clonable (Deep Copy).
 """
 
-from typing import List, Optional, Set, Dict, Literal
+from typing import List, Optional, Set, Dict, Literal, Union, TYPE_CHECKING
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 
@@ -404,10 +404,18 @@ class GameState(BaseModel):
     random_seed: Optional[int] = Field(None, description="RNG seed for deterministic simulation")
     move_history: List[str] = Field(default_factory=list, description="Action history for replay")
 
-    # Interrupt Stack (for multi-step ability resolution)
+    # Resolution Stack (Sequential State Machine for complex actions)
+    # LIFO stack - top step generates actions and must complete before lower steps
+    resolution_stack: List['ResolutionStep'] = Field(
+        default_factory=list,
+        description="Stack of pending resolution steps for multi-step actions"
+    )
+
+    # Interrupt Stack (LEGACY - for multi-step ability resolution)
+    # NOTE: Use resolution_stack for new implementations
     pending_interrupt: Optional['SearchAndAttachState'] = Field(
         None,
-        description="Active interrupt state for multi-step abilities (e.g., Infernal Reign)"
+        description="LEGACY: Active interrupt state for multi-step abilities (e.g., Infernal Reign)"
     )
 
     @field_validator('players')
@@ -444,20 +452,278 @@ class GameState(BaseModel):
         """Create a deep copy of the game state for MCTS simulation."""
         return self.model_copy(deep=True)
 
+    # -------------------------------------------------------------------------
+    # Resolution Stack Helpers
+    # -------------------------------------------------------------------------
+
+    def has_pending_resolution(self) -> bool:
+        """Check if there are pending resolution steps or legacy interrupts."""
+        return len(self.resolution_stack) > 0 or self.pending_interrupt is not None
+
+    def get_current_step(self) -> Optional['ResolutionStep']:
+        """Get the current (top) resolution step, if any."""
+        if self.resolution_stack:
+            return self.resolution_stack[-1]
+        return None
+
+    def push_step(self, step: 'ResolutionStep') -> None:
+        """Push a new resolution step onto the stack."""
+        self.resolution_stack.append(step)
+
+    def pop_step(self) -> Optional['ResolutionStep']:
+        """Pop and return the top resolution step."""
+        if self.resolution_stack:
+            return self.resolution_stack.pop()
+        return None
+
+    def clear_resolution_stack(self) -> None:
+        """Clear all pending resolution steps."""
+        self.resolution_stack = []
+
 
 # ============================================================================
-# 7. INTERRUPT STACK STATES (Multi-step ability resolution)
+# 7. RESOLUTION STACK (Sequential State Machine for Complex Actions)
 # ============================================================================
+#
+# This architecture replaces "Atomic Actions" that pre-calculate all combinations.
+# Instead, complex moves are broken into a linear sequence of simple selection steps.
+#
+# OLD: Action(Play Ultra Ball, Discard=[A, B], Search=C)  -- 190+ combinations!
+# NEW: Action(Play Ultra Ball) → Action(Select A) → Action(Select B) → Action(Select C)
+#
+# Benefits:
+# - Dramatically reduces branching factor for MCTS AI
+# - Generic actions (SELECT_CARD) help neural nets generalize
+# - Cleaner separation of concerns (cards push steps, engine processes them)
 
+
+class StepType(str, Enum):
+    """Types of resolution steps in the stack."""
+    SELECT_FROM_ZONE = "select_from_zone"       # Select cards from a zone (hand, deck, bench)
+    SEARCH_DECK = "search_deck"                 # Search deck and select cards
+    ATTACH_TO_TARGET = "attach_to_target"       # Attach selected card to a Pokemon
+    EVOLVE_TARGET = "evolve_target"             # Evolve a specific Pokemon
+
+
+class SelectionPurpose(str, Enum):
+    """Purpose of a selection step (for UI/AI context)."""
+    DISCARD_COST = "discard_cost"               # Discarding as a cost (Ultra Ball)
+    SEARCH_TARGET = "search_target"             # Selecting search results (Ultra Ball, Nest Ball)
+    EVOLUTION_BASE = "evolution_base"           # Selecting Pokemon to evolve (Rare Candy)
+    EVOLUTION_STAGE = "evolution_stage"         # Selecting evolution card (Rare Candy)
+    ATTACH_TARGET = "attach_target"             # Selecting attachment destination
+    BENCH_TARGET = "bench_target"               # Selecting bench destination
+    ENERGY_TO_ATTACH = "energy_to_attach"       # Selecting energy card from hand to attach
+
+
+class ZoneType(str, Enum):
+    """Zone types for selection steps."""
+    HAND = "hand"
+    DECK = "deck"
+    BENCH = "bench"
+    ACTIVE = "active"
+    BOARD = "board"                             # Active + Bench
+    DISCARD = "discard"
+
+
+class ResolutionStep(BaseModel):
+    """
+    Base class for resolution stack steps.
+
+    Each step represents one atomic decision point in a multi-step action.
+    Steps are processed LIFO (stack) - the top step generates actions and
+    resolves before lower steps can continue.
+
+    Subclasses override:
+    - get_legal_actions(): Generate actions for this step
+    - resolve(): Process a selection and return updated state
+    - is_complete(): Check if step is done
+    """
+    step_type: StepType = Field(..., description="Type of resolution step")
+    source_card_id: str = Field(..., description="Card that initiated this resolution")
+    source_card_name: str = Field("", description="Name of source card for display")
+    player_id: int = Field(..., description="Player who controls this step")
+    purpose: SelectionPurpose = Field(..., description="Why this selection is happening")
+
+    # Completion tracking
+    is_complete: bool = Field(False, description="Whether this step is finished")
+
+    # For chaining steps (e.g., after discard, do search)
+    on_complete_callback: Optional[str] = Field(
+        None,
+        description="Callback identifier for next step (resolved by engine)"
+    )
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class SelectFromZoneStep(ResolutionStep):
+    """
+    Step for selecting cards from a specific zone.
+
+    Used for:
+    - Discarding cards from hand (Ultra Ball cost)
+    - Selecting Pokemon on bench (Rare Candy target)
+    - Selecting evolution card from hand (Rare Candy)
+
+    Example (Ultra Ball):
+        SelectFromZoneStep(
+            zone=ZoneType.HAND,
+            count=2,
+            exact_count=True,
+            purpose=SelectionPurpose.DISCARD_COST,
+            filter_criteria={}  # Any card
+        )
+    """
+    step_type: StepType = Field(default=StepType.SELECT_FROM_ZONE)
+
+    # Selection parameters
+    zone: ZoneType = Field(..., description="Zone to select from")
+    count: int = Field(1, description="Number of cards to select")
+    min_count: int = Field(0, description="Minimum cards to select (0 = optional)")
+    exact_count: bool = Field(False, description="Must select exactly 'count' cards")
+
+    # Filtering
+    filter_criteria: Dict = Field(
+        default_factory=dict,
+        description="Filter for valid selections (e.g., {'supertype': 'Pokemon', 'subtype': 'Basic'})"
+    )
+    exclude_card_ids: List[str] = Field(
+        default_factory=list,
+        description="Card IDs to exclude from selection (e.g., the card being played)"
+    )
+
+    # State tracking
+    selected_card_ids: List[str] = Field(
+        default_factory=list,
+        description="Cards selected so far in this step"
+    )
+
+    # Context for chained steps
+    context: Dict = Field(
+        default_factory=dict,
+        description="Data to pass to subsequent steps (e.g., selected_basic_id for Rare Candy)"
+    )
+
+
+class SearchDeckStep(ResolutionStep):
+    """
+    Step for searching the deck and selecting cards.
+
+    Used for:
+    - Nest Ball (search for 1 Basic Pokemon)
+    - Ultra Ball (search for any Pokemon)
+    - Buddy-Buddy Poffin (search for up to 2 Basic Pokemon HP ≤ 70)
+    - Call for Family attack (search for up to 2 Basic Pokemon)
+
+    Example (Nest Ball):
+        SearchDeckStep(
+            count=1,
+            destination=ZoneType.BENCH,
+            purpose=SelectionPurpose.SEARCH_TARGET,
+            filter_criteria={'supertype': 'Pokemon', 'subtype': 'Basic'}
+        )
+    """
+    step_type: StepType = Field(default=StepType.SEARCH_DECK)
+
+    # Search parameters
+    count: int = Field(1, description="Maximum cards to select")
+    min_count: int = Field(0, description="Minimum cards to select (0 = can fail search)")
+    destination: ZoneType = Field(ZoneType.HAND, description="Where selected cards go")
+
+    # Filtering
+    filter_criteria: Dict = Field(
+        default_factory=dict,
+        description="Filter for searchable cards"
+    )
+
+    # State tracking
+    selected_card_ids: List[str] = Field(
+        default_factory=list,
+        description="Cards selected from deck"
+    )
+
+    # Options
+    shuffle_after: bool = Field(True, description="Shuffle deck after search")
+    reveal_cards: bool = Field(False, description="Reveal selected cards to opponent")
+
+
+class AttachToTargetStep(ResolutionStep):
+    """
+    Step for attaching a card to a target Pokemon.
+
+    Used for:
+    - Infernal Reign (attach selected Fire Energy to Pokemon)
+    - Future energy attachment effects
+
+    Example (Infernal Reign - one energy):
+        AttachToTargetStep(
+            card_to_attach_id="fire_energy_123",
+            valid_targets=[...list of Pokemon IDs...],
+            purpose=SelectionPurpose.ATTACH_TARGET
+        )
+    """
+    step_type: StepType = Field(default=StepType.ATTACH_TO_TARGET)
+
+    # What to attach
+    card_to_attach_id: str = Field(..., description="Card instance ID to attach")
+    card_to_attach_name: str = Field("", description="Card name for display")
+
+    # Valid targets
+    valid_target_ids: List[str] = Field(
+        default_factory=list,
+        description="Pokemon IDs that can receive the attachment"
+    )
+
+    # Selected target
+    selected_target_id: Optional[str] = Field(None, description="Chosen target")
+
+
+class EvolveTargetStep(ResolutionStep):
+    """
+    Step for evolving a specific Pokemon.
+
+    Used for:
+    - Rare Candy (evolve Basic directly to Stage 2)
+    - Future evolution effects
+
+    Example (Rare Candy final step):
+        EvolveTargetStep(
+            base_pokemon_id="pidgey_123",
+            evolution_card_id="pidgeot_ex_456",
+            purpose=SelectionPurpose.EVOLUTION_STAGE
+        )
+    """
+    step_type: StepType = Field(default=StepType.EVOLVE_TARGET)
+
+    # Evolution details
+    base_pokemon_id: str = Field(..., description="Pokemon to evolve")
+    evolution_card_id: str = Field(..., description="Evolution card to use")
+
+    # Validation
+    skip_evolution_sickness: bool = Field(
+        False,
+        description="Whether to skip first-turn-in-play check (Rare Candy doesn't skip this)"
+    )
+    skip_stage: bool = Field(
+        False,
+        description="Whether to allow skipping evolution stages (True for Rare Candy)"
+    )
+
+
+# Legacy support - keep SearchAndAttachState for backward compatibility
 class InterruptPhase(str, Enum):
-    """Phases for multi-step interrupt resolution."""
+    """Phases for multi-step interrupt resolution (LEGACY - use ResolutionStep instead)."""
     SEARCH_SELECT = "search_select"     # Selecting cards from deck search
     ATTACH_ENERGY = "attach_energy"     # Choosing where to attach energy
 
 
 class SearchAndAttachState(BaseModel):
     """
-    Interrupt state for search-and-attach abilities like Infernal Reign.
+    LEGACY: Interrupt state for search-and-attach abilities like Infernal Reign.
+
+    NOTE: This is kept for backward compatibility. New implementations should use
+    the ResolutionStep architecture with resolution_stack instead.
 
     This enables MCTS to break down complex abilities into atomic choices:
     1. Search phase: Select up to N cards from deck
@@ -522,10 +788,16 @@ class ActionType(str, Enum):
     TAKE_PRIZE = "take_prize"
     PROMOTE_ACTIVE = "promote_active"
 
-    # Interrupt Stack Actions (Multi-step ability resolution)
+    # Interrupt Stack Actions (LEGACY - kept for backward compatibility)
     SEARCH_SELECT_CARD = "search_select_card"     # Select a card during search phase
     SEARCH_CONFIRM = "search_confirm"             # Confirm search selection (done selecting)
     INTERRUPT_ATTACH_ENERGY = "interrupt_attach_energy"  # Attach energy during interrupt
+
+    # Resolution Stack Actions (NEW - Sequential State Machine)
+    # These generic actions work across different card effects
+    SELECT_CARD = "select_card"                   # Select a single card from a zone
+    CONFIRM_SELECTION = "confirm_selection"       # Confirm current selection (done selecting)
+    CANCEL_ACTION = "cancel_action"               # Cancel the current multi-step action (if allowed)
 
     # Chance
     COIN_FLIP = "coin_flip"

@@ -49,10 +49,10 @@ def basic_game_state():
 
 
 class TestEnergyAttachment:
-    """Test energy attachment mechanics."""
+    """Test energy attachment mechanics using Stack architecture."""
 
     def test_attach_energy_to_active(self, engine, basic_game_state):
-        """Should be able to attach energy to active Pokemon."""
+        """Should be able to attach energy to active Pokemon via stack."""
         state = basic_game_state
         player = state.players[0]
 
@@ -60,26 +60,49 @@ class TestEnergyAttachment:
         energy = create_card_instance("base1-98", owner_id=0)  # Fire Energy
         player.hand.add_card(energy)
 
-        # Get energy attachment actions
+        # Get energy attachment actions (now returns single stack-initiating action)
         actions = engine._get_attach_energy_actions(state)
 
-        # Should have at least one action for active Pokemon
-        assert len(actions) > 0, "Should have energy attachment actions"
+        # Should have exactly one action to initiate attachment
+        assert len(actions) == 1, "Should have single attach energy action"
+        assert actions[0].action_type == ActionType.ATTACH_ENERGY
+        assert actions[0].parameters.get('use_stack') is True
 
-        # Find action for active Pokemon
-        active_action = next((a for a in actions if a.target_id == player.board.active_spot.id), None)
-        assert active_action is not None, "Should have action to attach to active"
+        # Apply the action to initiate the stack
+        state = engine._apply_attach_energy(state, actions[0])
 
-        # Apply the action
-        state = engine._apply_attach_energy(state, active_action)
+        # Should now have a SelectFromZoneStep on the stack
+        assert state.has_pending_resolution()
+        step = state.get_current_step()
+        assert step.purpose.value == "energy_to_attach"
+
+        # Get actions from stack (should be SELECT_CARD actions for energy)
+        select_actions = engine.get_legal_actions(state)
+        energy_select_actions = [a for a in select_actions if a.action_type == ActionType.SELECT_CARD]
+        assert len(energy_select_actions) == 1, "Should have one energy to select"
+
+        # Select the energy (auto-confirms since exact_count=True and count=1)
+        state = engine.step(state, energy_select_actions[0])
+
+        # Now should have AttachToTargetStep - get target selection actions
+        target_actions = engine.get_legal_actions(state)
+        target_select_actions = [a for a in target_actions if a.action_type == ActionType.SELECT_CARD]
+
+        # Select active as target
+        active_id = state.players[0].board.active_spot.id
+        active_target_action = next((a for a in target_select_actions if a.target_id == active_id), None)
+        assert active_target_action is not None, "Should have action to attach to active"
+
+        state = engine.step(state, active_target_action)
         player = state.players[0]
 
         # Verify energy was attached
         assert len(player.board.active_spot.attached_energy) == 1, "Energy should be attached"
         assert player.energy_attached_this_turn is True, "Flag should be set"
+        assert not state.has_pending_resolution(), "Stack should be empty"
 
     def test_attach_energy_to_bench(self, engine, basic_game_state):
-        """Should be able to attach energy to benched Pokemon."""
+        """Should be able to attach energy to benched Pokemon via stack."""
         state = basic_game_state
         player = state.players[0]
 
@@ -91,26 +114,37 @@ class TestEnergyAttachment:
         energy = create_card_instance("base1-98", owner_id=0)
         player.hand.add_card(energy)
 
-        # Get energy attachment actions
+        # Initiate attach energy
         actions = engine._get_attach_energy_actions(state)
+        state = engine._apply_attach_energy(state, actions[0])
 
-        # Find action for bench Pokemon
-        bench_action = next((a for a in actions if a.target_id == bench_mon.id), None)
-        assert bench_action is not None, "Should have action to attach to bench"
+        # Select the energy (auto-confirms since exact_count=True and count=1)
+        select_actions = engine.get_legal_actions(state)
+        energy_select_actions = [a for a in select_actions if a.action_type == ActionType.SELECT_CARD]
+        state = engine.step(state, energy_select_actions[0])
 
-        # Apply the action
-        state = engine._apply_attach_energy(state, bench_action)
+        # Select bench as target
+        target_actions = engine.get_legal_actions(state)
+        bench_target_action = next((a for a in target_actions if a.target_id == bench_mon.id), None)
+        assert bench_target_action is not None, "Should have action to attach to bench"
+
+        state = engine.step(state, bench_target_action)
         player = state.players[0]
 
         # Verify energy was attached to bench
         assert len(player.board.bench[0].attached_energy) == 1, "Energy should be attached to bench"
 
-    def test_energy_deduplication(self, engine, basic_game_state):
-        """Multiple copies of same energy should generate one action per target."""
+    def test_attach_energy_single_initial_action(self, engine, basic_game_state):
+        """Stack approach generates single initial action regardless of targets."""
         state = basic_game_state
         player = state.players[0]
 
-        # Add 3 Fire Energy cards to hand
+        # Add Pokemon to bench (so there are multiple targets)
+        for i in range(3):
+            bench_mon = create_card_instance("sv2-81", owner_id=0)
+            player.board.add_to_bench(bench_mon)
+
+        # Add multiple Fire Energy cards to hand
         for _ in range(3):
             energy = create_card_instance("base1-98", owner_id=0)
             player.hand.add_card(energy)
@@ -118,9 +152,8 @@ class TestEnergyAttachment:
         # Get energy attachment actions
         actions = engine._get_attach_energy_actions(state)
 
-        # Should have one action for active (not 3)
-        active_actions = [a for a in actions if a.target_id == player.board.active_spot.id]
-        assert len(active_actions) == 1, "Should deduplicate identical energy cards"
+        # Should have exactly 1 action (not 3 energy * 4 targets = 12)
+        assert len(actions) == 1, "Stack approach should generate single action"
 
 
 class TestEnergyAttachmentRestrictions:

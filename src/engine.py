@@ -95,16 +95,25 @@ class PokemonEngine:
         """
         Handle interrupts that force player choices.
 
+        Priority Order (highest first):
+        1. Resolution Stack (NEW) - Sequential state machine for complex actions
+        2. Legacy SearchAndAttachState - Old interrupt system (deprecated)
+        3. Promote Active - Must promote when Active KO'd
+        4. Bench Collapse - Must discard when bench exceeds max
+
         Examples:
+        - Resolution Stack -> Ultra Ball discard selection, Rare Candy target selection
         - Active Pokémon KO'd -> Must promote from bench
         - Bench > max_size -> Must discard Pokémon
-        - Prize card selection (if applicable)
-        - SearchAndAttachState -> Multi-step ability resolution (e.g., Infernal Reign)
         """
         player = state.get_active_player()
         actions = []
 
-        # INTERRUPT 0: SearchAndAttachState (Highest priority - ability in progress)
+        # INTERRUPT 0: Resolution Stack (HIGHEST PRIORITY - new sequential state machine)
+        if state.resolution_stack:
+            return self._get_resolution_stack_actions(state)
+
+        # INTERRUPT 1: Legacy SearchAndAttachState (kept for backward compatibility)
         if state.pending_interrupt is not None:
             interrupt = state.pending_interrupt
             return self._get_search_and_attach_actions(state, interrupt)
@@ -288,6 +297,518 @@ class PokemonEngine:
                 return False
 
         return True
+
+    # ========================================================================
+    # 2b. RESOLUTION STACK ACTIONS (Sequential State Machine)
+    # ========================================================================
+
+    def _get_resolution_stack_actions(self, state: GameState) -> List[Action]:
+        """
+        Generate actions for the current resolution stack step.
+
+        The resolution stack is a LIFO structure where each step represents
+        one atomic decision point. Only the TOP step generates actions.
+
+        Returns:
+            List of legal actions for the current step
+        """
+        from models import (
+            StepType, SelectFromZoneStep, SearchDeckStep,
+            AttachToTargetStep, EvolveTargetStep, ActionType,
+            ZoneType, SelectionPurpose
+        )
+        from cards.registry import create_card
+        from cards.base import PokemonCard
+
+        if not state.resolution_stack:
+            return []
+
+        current_step = state.resolution_stack[-1]
+        player = state.get_player(current_step.player_id)
+        actions = []
+
+        if current_step.step_type == StepType.SELECT_FROM_ZONE:
+            actions = self._get_select_from_zone_actions(state, current_step, player)
+
+        elif current_step.step_type == StepType.SEARCH_DECK:
+            actions = self._get_search_deck_actions(state, current_step, player)
+
+        elif current_step.step_type == StepType.ATTACH_TO_TARGET:
+            actions = self._get_attach_to_target_actions(state, current_step, player)
+
+        elif current_step.step_type == StepType.EVOLVE_TARGET:
+            actions = self._get_evolve_target_actions(state, current_step, player)
+
+        return actions
+
+    def _get_select_from_zone_actions(
+        self,
+        state: GameState,
+        step: 'SelectFromZoneStep',
+        player: PlayerState
+    ) -> List[Action]:
+        """
+        Generate SELECT_CARD actions for a SelectFromZoneStep.
+
+        Used for:
+        - Discarding cards from hand (Ultra Ball cost)
+        - Selecting Pokemon on bench (Rare Candy base)
+        - Selecting evolution card from hand (Rare Candy)
+        - Selecting energy to attach (Attach Energy)
+
+        For energy selection, identical cards are deduplicated by functional ID
+        so players don't see "Basic Fire Energy" listed multiple times.
+        """
+        from models import ActionType, ZoneType, SelectionPurpose
+        from cards.registry import create_card
+        from cards.base import PokemonCard
+
+        actions = []
+
+        # Get cards from the specified zone
+        zone_cards = self._get_zone_cards(player, step.zone)
+
+        # Filter out excluded cards and already-selected cards
+        available_cards = [
+            card for card in zone_cards
+            if card.id not in step.exclude_card_ids
+            and card.id not in step.selected_card_ids
+        ]
+
+        # Apply filter criteria if specified
+        if step.filter_criteria:
+            available_cards = [
+                card for card in available_cards
+                if self._card_matches_step_filter(card, step.filter_criteria, state, player)
+            ]
+
+        # Calculate how many more selections are needed
+        remaining_selections = step.count - len(step.selected_card_ids)
+
+        # Generate SELECT_CARD action for each available card (only if we can still select more)
+        if remaining_selections > 0:
+            # Deduplicate by functional ID for certain purposes
+            # so identical cards show as one option
+            should_deduplicate = step.purpose in (
+                SelectionPurpose.ENERGY_TO_ATTACH,
+                SelectionPurpose.EVOLUTION_STAGE,  # Rare Candy Stage 2 selection
+            )
+
+            if should_deduplicate:
+                # Group cards by functional ID
+                seen_functional_ids = set()
+                deduplicated_cards = []
+                for card in available_cards:
+                    # Use functional_id_map if available, otherwise use card_id
+                    functional_id = player.functional_id_map.get(card.card_id, card.card_id)
+                    if functional_id not in seen_functional_ids:
+                        seen_functional_ids.add(functional_id)
+                        deduplicated_cards.append(card)
+                available_cards = deduplicated_cards
+
+            for card in available_cards:
+                card_def = create_card(card.card_id)
+                card_name = card_def.name if card_def else card.card_id
+
+                # Build descriptive label
+                selection_num = len(step.selected_card_ids) + 1
+                purpose_label = self._get_purpose_label(step.purpose)
+
+                actions.append(Action(
+                    action_type=ActionType.SELECT_CARD,
+                    player_id=player.player_id,
+                    card_id=card.id,
+                    metadata={
+                        "step_type": step.step_type.value,
+                        "purpose": step.purpose.value,
+                        "zone": step.zone.value,
+                        "selection_number": selection_num,
+                        "max_selections": step.count,
+                        "source_card": step.source_card_name
+                    },
+                    display_label=f"{step.source_card_name}: Select {card_name} ({purpose_label} {selection_num}/{step.count})"
+                ))
+
+        # Add CONFIRM_SELECTION action if minimum selections reached
+        if len(step.selected_card_ids) >= step.min_count:
+            # Can confirm with current selection (or 0 if min_count is 0)
+            if step.exact_count and len(step.selected_card_ids) < step.count:
+                # Exact count required but not met - can only confirm if no more cards available
+                if not available_cards:
+                    actions.append(self._create_confirm_action(state, step, player))
+            else:
+                actions.append(self._create_confirm_action(state, step, player))
+
+        return actions
+
+    def _get_search_deck_actions(
+        self,
+        state: GameState,
+        step: 'SearchDeckStep',
+        player: PlayerState
+    ) -> List[Action]:
+        """
+        Generate SELECT_CARD actions for a SearchDeckStep.
+
+        Used for:
+        - Nest Ball (search for Basic Pokemon)
+        - Ultra Ball (search for any Pokemon)
+        - Buddy-Buddy Poffin (search for Basic HP ≤ 70)
+        - Call for Family (search for Basic Pokemon)
+
+        Cards are deduplicated by functional ID so identical cards
+        (e.g., two Charmanders with same stats) show as one option.
+        """
+        from models import ActionType
+        from cards.registry import create_card
+        from cards.base import PokemonCard
+
+        actions = []
+
+        # Search through deck
+        available_cards = [
+            card for card in player.deck.cards
+            if card.id not in step.selected_card_ids
+            and self._card_matches_step_filter(card, step.filter_criteria, state, player)
+        ]
+
+        # Calculate remaining selections
+        remaining_selections = step.count - len(step.selected_card_ids)
+
+        # Generate SELECT_CARD action for each searchable card (only if we can still select more)
+        if remaining_selections > 0:
+            # Deduplicate by functional ID so identical cards show as one option
+            seen_functional_ids = set()
+            deduplicated_cards = []
+            for card in available_cards:
+                # Use functional_id_map if available, otherwise compute
+                functional_id = player.functional_id_map.get(card.card_id)
+                if not functional_id:
+                    card_def = create_card(card.card_id)
+                    if card_def:
+                        if isinstance(card_def, PokemonCard):
+                            functional_id = self._compute_functional_id(card_def)
+                        else:
+                            functional_id = card_def.name if hasattr(card_def, 'name') else card.card_id
+                    else:
+                        functional_id = card.card_id
+
+                if functional_id not in seen_functional_ids:
+                    seen_functional_ids.add(functional_id)
+                    deduplicated_cards.append(card)
+
+            for card in deduplicated_cards:
+                card_def = create_card(card.card_id)
+                card_name = card_def.name if card_def else card.card_id
+
+                selection_num = len(step.selected_card_ids) + 1
+
+                actions.append(Action(
+                    action_type=ActionType.SELECT_CARD,
+                    player_id=player.player_id,
+                    card_id=card.id,
+                    metadata={
+                        "step_type": step.step_type.value,
+                        "purpose": step.purpose.value,
+                        "selection_number": selection_num,
+                        "max_selections": step.count,
+                        "source_card": step.source_card_name,
+                        "destination": step.destination.value
+                    },
+                    display_label=f"{step.source_card_name}: Search {card_name} ({selection_num}/{step.count})"
+                ))
+
+        # Add CONFIRM_SELECTION action (can always confirm search, even with 0 results)
+        if len(step.selected_card_ids) >= step.min_count:
+            actions.append(self._create_confirm_action(state, step, player))
+
+        # Always allow "fail search" option
+        if len(step.selected_card_ids) == 0 and step.min_count == 0:
+            # Already included via confirm action above
+            pass
+
+        return actions
+
+    def _get_attach_to_target_actions(
+        self,
+        state: GameState,
+        step: 'AttachToTargetStep',
+        player: PlayerState
+    ) -> List[Action]:
+        """
+        Generate SELECT_CARD actions for AttachToTargetStep.
+
+        Used for:
+        - Infernal Reign (attach Fire Energy to Pokemon)
+        """
+        from models import ActionType
+        from cards.registry import create_card
+
+        actions = []
+
+        # Get valid target Pokemon
+        for target_id in step.valid_target_ids:
+            # Find the Pokemon
+            target_pokemon = self._find_pokemon_by_id(player, target_id)
+            if not target_pokemon:
+                continue
+
+            target_def = create_card(target_pokemon.card_id)
+            target_name = target_def.name if target_def else target_pokemon.card_id
+
+            actions.append(Action(
+                action_type=ActionType.SELECT_CARD,
+                player_id=player.player_id,
+                card_id=step.card_to_attach_id,
+                target_id=target_id,
+                metadata={
+                    "step_type": step.step_type.value,
+                    "purpose": step.purpose.value,
+                    "source_card": step.source_card_name,
+                    "card_to_attach": step.card_to_attach_name
+                },
+                display_label=f"Attach {step.card_to_attach_name} to {target_name}"
+            ))
+
+        return actions
+
+    def _get_evolve_target_actions(
+        self,
+        state: GameState,
+        step: 'EvolveTargetStep',
+        player: PlayerState
+    ) -> List[Action]:
+        """
+        Generate action for EvolveTargetStep.
+
+        This step has predetermined targets (base + evolution), so it
+        generates a single CONFIRM_SELECTION action to execute the evolution.
+        No further selection is needed - just confirmation.
+        """
+        from models import ActionType
+        from cards.registry import create_card
+
+        base_pokemon = self._find_pokemon_by_id(player, step.base_pokemon_id)
+        if not base_pokemon:
+            return []
+
+        evolution_card = player.hand.find_card(step.evolution_card_id)
+        if not evolution_card:
+            return []
+
+        base_def = create_card(base_pokemon.card_id)
+        evo_def = create_card(evolution_card.card_id)
+
+        base_name = base_def.name if base_def else base_pokemon.card_id
+        evo_name = evo_def.name if evo_def else evolution_card.card_id
+
+        # Use CONFIRM_SELECTION since targets are already set
+        return [Action(
+            action_type=ActionType.CONFIRM_SELECTION,
+            player_id=player.player_id,
+            metadata={
+                "step_type": step.step_type.value,
+                "purpose": step.purpose.value,
+                "source_card": step.source_card_name,
+                "is_evolution": True,
+                "base_pokemon_id": step.base_pokemon_id,
+                "evolution_card_id": step.evolution_card_id
+            },
+            display_label=f"Evolve {base_name} into {evo_name}"
+        )]
+
+    def _create_confirm_action(
+        self,
+        state: GameState,
+        step: 'ResolutionStep',
+        player: PlayerState
+    ) -> Action:
+        """Create a CONFIRM_SELECTION action for the current step."""
+        from models import ActionType
+
+        selected_count = 0
+        if hasattr(step, 'selected_card_ids'):
+            selected_count = len(step.selected_card_ids)
+
+        if selected_count == 0:
+            label = f"{step.source_card_name}: Confirm (select nothing)"
+        else:
+            label = f"{step.source_card_name}: Confirm selection ({selected_count} card{'s' if selected_count != 1 else ''})"
+
+        return Action(
+            action_type=ActionType.CONFIRM_SELECTION,
+            player_id=player.player_id,
+            metadata={
+                "step_type": step.step_type.value,
+                "purpose": step.purpose.value,
+                "source_card": step.source_card_name,
+                "selected_count": selected_count
+            },
+            display_label=label
+        )
+
+    def _get_zone_cards(self, player: PlayerState, zone: 'ZoneType') -> List[CardInstance]:
+        """Get cards from a player's zone."""
+        from models import ZoneType
+
+        if zone == ZoneType.HAND:
+            return player.hand.cards
+        elif zone == ZoneType.DECK:
+            return player.deck.cards
+        elif zone == ZoneType.DISCARD:
+            return player.discard.cards
+        elif zone == ZoneType.BENCH:
+            return [p for p in player.board.bench if p is not None]
+        elif zone == ZoneType.ACTIVE:
+            return [player.board.active_spot] if player.board.active_spot else []
+        elif zone == ZoneType.BOARD:
+            return player.board.get_all_pokemon()
+        return []
+
+    def _card_matches_step_filter(self, card: CardInstance, filter_criteria: Dict, state: GameState = None, player: PlayerState = None) -> bool:
+        """
+        Check if a card matches step filter criteria.
+
+        Supports filters:
+        - supertype: 'Pokemon', 'Trainer', 'Energy'
+        - subtype: 'Basic', 'Stage 1', 'Stage 2', 'Item', etc.
+        - max_hp: Maximum HP for Pokemon
+        - energy_type: For energy cards
+        - name: Specific card name
+        - evolves_from: For evolution filtering
+        - rare_candy_target: Validate Basic has a matching Stage 2 in hand
+        """
+        from cards.registry import create_card
+        from cards.base import PokemonCard, EnergyCard, TrainerCard
+        from models import Subtype, Supertype
+
+        if not filter_criteria:
+            return True
+
+        card_def = create_card(card.card_id)
+        if not card_def:
+            return False
+
+        # Check supertype
+        if 'supertype' in filter_criteria:
+            required = filter_criteria['supertype']
+            if required == 'Pokemon' and not isinstance(card_def, PokemonCard):
+                return False
+            elif required == 'Energy' and not isinstance(card_def, EnergyCard):
+                return False
+            elif required == 'Trainer' and not isinstance(card_def, TrainerCard):
+                return False
+
+        # Check subtype
+        if 'subtype' in filter_criteria:
+            required = filter_criteria['subtype']
+            if isinstance(required, str):
+                required = Subtype(required)
+            if not hasattr(card_def, 'subtypes') or required not in card_def.subtypes:
+                return False
+
+        # Check max_hp (for Buddy-Buddy Poffin)
+        if 'max_hp' in filter_criteria:
+            if not isinstance(card_def, PokemonCard):
+                return False
+            if card_def.hp > filter_criteria['max_hp']:
+                return False
+
+        # Check energy_type
+        if 'energy_type' in filter_criteria:
+            if not isinstance(card_def, EnergyCard):
+                return False
+            if card_def.energy_type != filter_criteria['energy_type']:
+                return False
+
+        # Check name
+        if 'name' in filter_criteria:
+            if card_def.name != filter_criteria['name']:
+                return False
+
+        # Check evolves_from (for Rare Candy)
+        if 'evolves_from' in filter_criteria:
+            if not isinstance(card_def, PokemonCard):
+                return False
+            if not hasattr(card_def, 'evolves_from') or card_def.evolves_from != filter_criteria['evolves_from']:
+                return False
+
+        # Rare Candy: Check if this Basic Pokemon is a valid target
+        # (has been in play 1+ turns AND a Stage 2 in hand can evolve from it)
+        if 'rare_candy_target' in filter_criteria and filter_criteria['rare_candy_target']:
+            # This is a Pokemon in play - check evolution sickness
+            if card.turns_in_play < 1:
+                return False
+
+            # Must have state and player to validate Stage 2 availability
+            if not state or not player:
+                return False
+
+            # Check if any Stage 2 in hand can evolve from this specific Basic
+            from cards.utils import find_stage_2_chain_for_basic
+            from cards.factory import get_card_definition
+
+            has_matching_stage_2 = False
+            for hand_card in player.hand.cards:
+                hand_def = get_card_definition(hand_card)
+                if hand_def and hasattr(hand_def, 'subtypes') and Subtype.STAGE_2 in hand_def.subtypes:
+                    if find_stage_2_chain_for_basic(card_def, hand_def):
+                        has_matching_stage_2 = True
+                        break
+
+            if not has_matching_stage_2:
+                return False
+
+        # Rare Candy: Check if this Stage 2 can evolve from the specified Basic
+        if 'rare_candy_evolution_for' in filter_criteria:
+            base_pokemon_id = filter_criteria['rare_candy_evolution_for']
+            if not isinstance(card_def, PokemonCard):
+                return False
+            if not hasattr(card_def, 'subtypes') or Subtype.STAGE_2 not in card_def.subtypes:
+                return False
+
+            # Must have state and player to validate evolution chain
+            if not state or not player:
+                return False
+
+            # Find the base Pokemon to get its definition
+            base_pokemon = self._find_pokemon_by_id(player, base_pokemon_id)
+            if not base_pokemon:
+                return False
+
+            base_def = create_card(base_pokemon.card_id)
+            if not base_def:
+                return False
+
+            # Check if this Stage 2 can evolve from the selected Basic
+            from cards.utils import find_stage_2_chain_for_basic
+            if not find_stage_2_chain_for_basic(base_def, card_def):
+                return False
+
+        return True
+
+    def _find_pokemon_by_id(self, player: PlayerState, pokemon_id: str) -> Optional[CardInstance]:
+        """Find a Pokemon in play by its instance ID."""
+        if player.board.active_spot and player.board.active_spot.id == pokemon_id:
+            return player.board.active_spot
+        for pokemon in player.board.bench:
+            if pokemon and pokemon.id == pokemon_id:
+                return pokemon
+        return None
+
+    def _get_purpose_label(self, purpose: 'SelectionPurpose') -> str:
+        """Get a human-readable label for a selection purpose."""
+        from models import SelectionPurpose
+
+        labels = {
+            SelectionPurpose.DISCARD_COST: "discard",
+            SelectionPurpose.SEARCH_TARGET: "search",
+            SelectionPurpose.EVOLUTION_BASE: "base",
+            SelectionPurpose.EVOLUTION_STAGE: "evolution",
+            SelectionPurpose.ATTACH_TARGET: "attach to",
+            SelectionPurpose.BENCH_TARGET: "bench",
+        }
+        return labels.get(purpose, "select")
 
     # ========================================================================
     # 3. PHASE-SPECIFIC ACTION GENERATION
@@ -506,24 +1027,28 @@ class PokemonEngine:
 
     def _get_attach_energy_actions(self, state: GameState) -> List[Action]:
         """
-        Generate energy attachment actions.
+        Generate energy attachment action using the Stack architecture.
 
-        MCTS Optimization: Only one action per unique energy card name per target.
-        This prevents action space explosion when holding multiple copies.
+        Stack-Based Approach:
+        Instead of generating E×T actions (E energy types × T targets),
+        this generates a SINGLE action that initiates the resolution stack.
+
+        Stack Sequence:
+        1. SelectFromZoneStep: Select energy from hand
+        2. AttachToTargetStep: Select target Pokemon (via callback)
+
+        Branching Factor Reduction: E×T → 1 + E + T
+        Example: 3 energy types × 5 targets = 15 actions → 1 + 3 + 5 = 9 actions
         """
         from cards.registry import create_card
 
         player = state.get_active_player()
-        actions = []
 
-        # Find unique energy cards by name (deduplication for MCTS)
-        seen_energy_names = set()
-        unique_energy_cards = []
-
+        # Check if there's any energy in hand
+        has_energy = False
         for card in player.hand.cards:
             card_def = create_card(card.card_id)
             if card_def:
-                # Check supertype from json_data (for DataDrivenCards)
                 supertype = None
                 if hasattr(card_def, 'supertype'):
                     supertype = card_def.supertype
@@ -531,44 +1056,24 @@ class PokemonEngine:
                     supertype = card_def.json_data['supertype']
 
                 if supertype and supertype.lower() == 'energy':
-                    # Get card name for deduplication
-                    card_name = card_def.name if hasattr(card_def, 'name') else card.card_id
+                    has_energy = True
+                    break
 
-                    # Only add one representative per unique card name
-                    if card_name not in seen_energy_names:
-                        seen_energy_names.add(card_name)
-                        unique_energy_cards.append(card)
+        if not has_energy:
+            return []
 
-        # Can attach to any Pokémon in play
+        # Check if there's any Pokemon to attach to
         targets = player.board.get_all_pokemon()
+        if not targets:
+            return []
 
-        # Generate one action per unique energy type per target
-        for energy in unique_energy_cards:
-            energy_def = create_card(energy.card_id)
-            energy_name = energy_def.name if energy_def and hasattr(energy_def, 'name') else energy.card_id
-
-            for target in targets:
-                # Get target definition for name
-                target_def = create_card(target.card_id)
-                target_name = target_def.name if target_def and hasattr(target_def, 'name') else target.card_id
-
-                # Determine location label
-                if target == player.board.active_spot:
-                    location_label = "Active"
-                else:
-                    # Find bench index
-                    bench_index = next((idx for idx, p in enumerate(player.board.bench) if p and p.id == target.id), -1)
-                    location_label = f"Bench {bench_index + 1}"
-
-                actions.append(Action(
-                    action_type=ActionType.ATTACH_ENERGY,
-                    player_id=player.player_id,
-                    card_id=energy.id,
-                    target_id=target.id,
-                    display_label=f"Attach {energy_name} to {target_name} ({location_label})"
-                ))
-
-        return actions
+        # Generate a single action to initiate energy attachment
+        return [Action(
+            action_type=ActionType.ATTACH_ENERGY,
+            player_id=player.player_id,
+            parameters={'use_stack': True},
+            display_label="Attach Energy"
+        )]
 
     def _get_evolution_actions(self, state: GameState) -> List[Action]:
         """
@@ -1189,6 +1694,13 @@ class PokemonEngine:
             return self._apply_search_confirm(state, action)
         elif action.action_type == ActionType.INTERRUPT_ATTACH_ENERGY:
             return self._apply_interrupt_attach_energy(state, action)
+        # Resolution Stack Actions (new sequential state machine)
+        elif action.action_type == ActionType.SELECT_CARD:
+            return self._apply_select_card(state, action)
+        elif action.action_type == ActionType.CONFIRM_SELECTION:
+            return self._apply_confirm_selection(state, action)
+        elif action.action_type == ActionType.CANCEL_ACTION:
+            return self._apply_cancel_action(state, action)
         else:
             # Unknown action type
             return state
@@ -1269,7 +1781,36 @@ class PokemonEngine:
         return state
 
     def _apply_attach_energy(self, state: GameState, action: Action) -> GameState:
-        """Attach Energy card to Pokémon."""
+        """
+        Attach Energy card to Pokémon.
+
+        Two modes:
+        1. Stack mode (use_stack=True): Push SelectFromZoneStep to select energy
+        2. Direct mode (card_id + target_id provided): Execute attachment immediately
+        """
+        from models import SelectFromZoneStep, ZoneType, SelectionPurpose
+
+        # Check if this is a stack-based action
+        if action.parameters and action.parameters.get('use_stack'):
+            # Stack mode: Push a step to select energy from hand
+            player = state.get_player(action.player_id)
+
+            select_energy_step = SelectFromZoneStep(
+                source_card_id="attach_energy",
+                source_card_name="Attach Energy",
+                player_id=action.player_id,
+                purpose=SelectionPurpose.ENERGY_TO_ATTACH,
+                zone=ZoneType.HAND,
+                count=1,
+                exact_count=True,
+                filter_criteria={'supertype': 'Energy'},
+                on_complete_callback="attach_energy_select_target"
+            )
+
+            state.push_step(select_energy_step)
+            return state
+
+        # Direct mode: Execute the attachment
         player = state.get_player(action.player_id)
         energy = player.hand.remove_card(action.card_id)
 
@@ -1736,6 +2277,430 @@ class PokemonEngine:
 
         # Default fallback - should not happen in normal gameplay
         return "basic-fire-energy"
+
+    # ========================================================================
+    # RESOLUTION STACK ACTION HANDLERS (New Sequential State Machine)
+    # ========================================================================
+
+    def _apply_select_card(self, state: GameState, action: Action) -> GameState:
+        """
+        Handle selecting a card during resolution stack processing.
+
+        This adds the selected card to the current step's selected_card_ids.
+        The actual effect is deferred until CONFIRM_SELECTION is executed.
+
+        Works with: SelectFromZoneStep, SearchDeckStep, AttachToTargetStep
+        """
+        from models import StepType, SelectFromZoneStep, SearchDeckStep, AttachToTargetStep, ActionType, Action
+
+        if not state.resolution_stack:
+            return state
+
+        step = state.resolution_stack[-1]
+        card_id = action.card_id
+
+        if not card_id:
+            return state
+
+        # Handle based on step type
+        if step.step_type == StepType.SELECT_FROM_ZONE:
+            # SelectFromZoneStep - add to selected_card_ids
+            if isinstance(step, SelectFromZoneStep):
+                if card_id not in step.selected_card_ids:
+                    step.selected_card_ids.append(card_id)
+
+                # Auto-confirm when exact_count is True and we've reached the required count
+                # This eliminates unnecessary confirm steps
+                if step.exact_count and len(step.selected_card_ids) >= step.count:
+                    # Create a synthetic confirm action and execute it
+                    confirm_action = Action(
+                        action_type=ActionType.CONFIRM_SELECTION,
+                        player_id=step.player_id,
+                        metadata={"step_type": step.step_type.value}
+                    )
+                    state = self._apply_confirm_selection(state, confirm_action)
+
+        elif step.step_type == StepType.SEARCH_DECK:
+            # SearchDeckStep - add to selected_card_ids
+            if isinstance(step, SearchDeckStep):
+                if card_id not in step.selected_card_ids:
+                    step.selected_card_ids.append(card_id)
+                # Note: SearchDeckStep doesn't auto-confirm - searches are always optional
+                # (min_count can be 0), so players must manually confirm when ready.
+
+        elif step.step_type == StepType.ATTACH_TO_TARGET:
+            # AttachToTargetStep - set the selected_target_id and auto-execute
+            if isinstance(step, AttachToTargetStep):
+                step.selected_target_id = action.target_id  # Target is the Pokemon
+
+                # Auto-execute: AttachToTargetStep is a single-selection step
+                # Execute immediately rather than requiring CONFIRM_SELECTION
+                player = state.get_player(step.player_id)
+                state = self._execute_attach_to_target(state, step, player)
+
+                # Mark complete and pop
+                step.is_complete = True
+                state.resolution_stack.pop()
+
+                # Handle callback if present
+                if step.on_complete_callback:
+                    state = self._handle_step_callback(state, step)
+
+        elif step.step_type == StepType.EVOLVE_TARGET:
+            # EvolveTargetStep is auto-complete, no selection needed
+            pass
+
+        return state
+
+    def _apply_confirm_selection(self, state: GameState, action: Action) -> GameState:
+        """
+        Confirm the current step's selection and execute its effect.
+
+        This is where the actual game state changes happen:
+        - SelectFromZoneStep: Move cards (e.g., discard from hand)
+        - SearchDeckStep: Move cards to destination, shuffle deck
+        - AttachToTargetStep: Attach card to Pokemon
+        - EvolveTargetStep: Evolve the Pokemon
+
+        After execution, the step is popped and any callback is triggered.
+        """
+        from models import (
+            StepType, SelectFromZoneStep, SearchDeckStep,
+            AttachToTargetStep, EvolveTargetStep, ZoneType, SelectionPurpose
+        )
+        from actions import shuffle_deck
+
+        if not state.resolution_stack:
+            return state
+
+        step = state.resolution_stack[-1]
+        player = state.get_player(step.player_id)
+
+        # Execute based on step type
+        if step.step_type == StepType.SELECT_FROM_ZONE:
+            state = self._execute_select_from_zone(state, step, player)
+
+        elif step.step_type == StepType.SEARCH_DECK:
+            state = self._execute_search_deck(state, step, player)
+
+        elif step.step_type == StepType.ATTACH_TO_TARGET:
+            state = self._execute_attach_to_target(state, step, player)
+
+        elif step.step_type == StepType.EVOLVE_TARGET:
+            state = self._execute_evolve_target(state, step, player)
+
+        # Mark step as complete and pop from stack
+        step.is_complete = True
+        state.resolution_stack.pop()
+
+        # Handle callback if present (chain to next step)
+        if step.on_complete_callback:
+            state = self._handle_step_callback(state, step)
+
+        return state
+
+    def _apply_cancel_action(self, state: GameState, action: Action) -> GameState:
+        """
+        Cancel the current resolution and clear the stack.
+
+        Used when player decides not to proceed with a multi-step action.
+        Some cards may allow cancellation (costs not yet paid), others may not.
+        """
+        # For now, simply clear the resolution stack
+        # In the future, we may want to validate whether cancellation is allowed
+        state.clear_resolution_stack()
+        return state
+
+    def _execute_select_from_zone(self, state: GameState, step, player) -> GameState:
+        """
+        Execute a SelectFromZoneStep - move selected cards based on purpose.
+
+        Purpose determines what happens to selected cards:
+        - DISCARD_COST: Move from hand to discard pile
+        - EVOLUTION_BASE: Store in context for next step
+        - EVOLUTION_STAGE: Store in context for next step
+        """
+        from models import ZoneType, SelectionPurpose, SelectFromZoneStep
+
+        if not isinstance(step, SelectFromZoneStep):
+            return state
+
+        # Handle based on purpose
+        if step.purpose == SelectionPurpose.DISCARD_COST:
+            # Move selected cards from hand to discard
+            for card_id in step.selected_card_ids:
+                card = player.hand.remove_card(card_id)
+                if card:
+                    player.discard.add_card(card)
+
+        elif step.purpose == SelectionPurpose.EVOLUTION_BASE:
+            # Store the selected Pokemon ID in context for evolution step
+            if step.selected_card_ids:
+                step.context["evolution_base_id"] = step.selected_card_ids[0]
+
+        elif step.purpose == SelectionPurpose.EVOLUTION_STAGE:
+            # Store the selected evolution card ID in context
+            if step.selected_card_ids:
+                step.context["evolution_card_id"] = step.selected_card_ids[0]
+
+        elif step.purpose == SelectionPurpose.BENCH_TARGET:
+            # Store the selected bench Pokemon ID
+            if step.selected_card_ids:
+                step.context["bench_target_id"] = step.selected_card_ids[0]
+
+        return state
+
+    def _execute_search_deck(self, state: GameState, step, player) -> GameState:
+        """
+        Execute a SearchDeckStep - move selected cards to destination.
+
+        Destination determines where cards go:
+        - HAND: Move to hand
+        - BENCH: Put Basic Pokemon onto bench
+        - DISCARD: Move to discard pile
+        """
+        from models import ZoneType, SearchDeckStep
+        from actions import shuffle_deck
+
+        if not isinstance(step, SearchDeckStep):
+            return state
+
+        # Remove selected cards from deck
+        selected_cards = []
+        for card_id in step.selected_card_ids:
+            for i, deck_card in enumerate(player.deck.cards):
+                if deck_card.id == card_id:
+                    selected_cards.append(player.deck.cards.pop(i))
+                    break
+
+        # Move to destination
+        if step.destination == ZoneType.HAND:
+            for card in selected_cards:
+                player.hand.add_card(card)
+
+        elif step.destination == ZoneType.BENCH:
+            for card in selected_cards:
+                card.turns_in_play = 0
+                player.board.add_to_bench(card)
+
+        elif step.destination == ZoneType.DISCARD:
+            for card in selected_cards:
+                player.discard.add_card(card)
+
+        # Shuffle deck if required
+        if step.shuffle_after:
+            state = shuffle_deck(state, step.player_id)
+
+        # Mark that player has searched deck this turn
+        player.has_searched_deck = True
+
+        return state
+
+    def _execute_attach_to_target(self, state: GameState, step, player) -> GameState:
+        """
+        Execute an AttachToTargetStep - attach card to target Pokemon.
+
+        Handles two cases:
+        1. Card from hand (Attach Energy action): Remove from hand and attach
+        2. Card from deck/limbo (Infernal Reign): Create CardInstance and attach
+        """
+        from models import AttachToTargetStep, CardInstance
+
+        if not isinstance(step, AttachToTargetStep):
+            return state
+
+        if not step.selected_target_id:
+            return state
+
+        # Find the target Pokemon
+        target = self._find_pokemon_by_id(player, step.selected_target_id)
+        if not target:
+            return state
+
+        card_id = step.card_to_attach_id
+
+        # Check if the card is in hand (Attach Energy flow)
+        energy_card = next((c for c in player.hand.cards if c.id == card_id), None)
+        if energy_card:
+            # Remove from hand and attach
+            energy_card = player.hand.remove_card(card_id)
+            if energy_card:
+                target.attached_energy.append(energy_card)
+                player.energy_attached_this_turn = True
+
+                # Trigger "on_attach_energy" hooks
+                self._check_triggers(state, "on_attach_energy", {
+                    "energy_card": energy_card,
+                    "target_pokemon": target,
+                    "player_id": step.player_id,
+                    "source": "hand"
+                })
+        else:
+            # Card from deck/limbo (Infernal Reign or similar)
+            # Create a CardInstance for it
+            card_def_id = self._get_card_definition_id_for_attach(state, card_id, player)
+
+            energy_card = CardInstance(
+                id=card_id,
+                card_id=card_def_id,
+                owner_id=step.player_id
+            )
+
+            target.attached_energy.append(energy_card)
+
+        return state
+
+    def _execute_evolve_target(self, state: GameState, step, player) -> GameState:
+        """
+        Execute an EvolveTargetStep - evolve the base Pokemon.
+        """
+        from models import EvolveTargetStep
+        from actions import evolve_pokemon
+
+        if not isinstance(step, EvolveTargetStep):
+            return state
+
+        # Use the existing evolve_pokemon action
+        # Pass skip_stage=True for Rare Candy evolutions
+        state = evolve_pokemon(
+            state,
+            player.player_id,
+            step.base_pokemon_id,
+            step.evolution_card_id,
+            skip_stage=step.skip_stage
+        )
+
+        return state
+
+    def _get_card_definition_id_for_attach(self, state: GameState, instance_id: str, player) -> str:
+        """
+        Get the card definition ID for attaching a card.
+
+        This searches the step context and game zones.
+        """
+        # First check if it's in the context of any pending steps
+        for step in state.resolution_stack:
+            if hasattr(step, 'context') and 'card_definitions' in step.context:
+                if instance_id in step.context['card_definitions']:
+                    return step.context['card_definitions'][instance_id]
+
+        # Search zones
+        for p in state.players:
+            for card in p.deck.cards:
+                if card.id == instance_id:
+                    return card.card_id
+            for card in p.discard.cards:
+                if card.id == instance_id:
+                    return card.card_id
+            for card in p.hand.cards:
+                if card.id == instance_id:
+                    return card.card_id
+
+        # Fallback
+        return "basic-fire-energy"
+
+    def _handle_step_callback(self, state: GameState, completed_step) -> GameState:
+        """
+        Handle the callback after a step completes.
+
+        Callbacks allow chaining steps, e.g.:
+        - Ultra Ball: After DISCARD_COST, push SEARCH_DECK step
+        - Rare Candy: After selecting base, push select evolution step
+        """
+        from models import (
+            SelectFromZoneStep, SearchDeckStep, AttachToTargetStep,
+            ZoneType, SelectionPurpose
+        )
+
+        callback = completed_step.on_complete_callback
+
+        if callback == "ultra_ball_search":
+            # Push a search step for Ultra Ball
+            search_step = SearchDeckStep(
+                source_card_id=completed_step.source_card_id,
+                source_card_name=completed_step.source_card_name,
+                player_id=completed_step.player_id,
+                purpose=SelectionPurpose.SEARCH_TARGET,
+                count=1,
+                min_count=0,
+                destination=ZoneType.HAND,
+                filter_criteria={"supertype": "Pokemon"},
+                shuffle_after=True
+            )
+            state.push_step(search_step)
+
+        elif callback == "rare_candy_select_evolution":
+            # Push a step to select the Stage 2 evolution from hand
+            base_id = completed_step.context.get("evolution_base_id")
+            if base_id:
+                # Create step to select Stage 2 from hand
+                # The filter will ensure only Stage 2s that can evolve from the chosen Basic are shown
+                select_stage_2_step = SelectFromZoneStep(
+                    source_card_id=completed_step.source_card_id,
+                    source_card_name=completed_step.source_card_name,
+                    player_id=completed_step.player_id,
+                    purpose=SelectionPurpose.EVOLUTION_STAGE,
+                    zone=ZoneType.HAND,
+                    count=1,
+                    exact_count=True,
+                    filter_criteria={
+                        'supertype': 'Pokemon',
+                        'subtype': 'Stage 2',
+                        'rare_candy_evolution_for': base_id  # Custom filter: Stage 2s that can evolve from this Basic
+                    },
+                    context={'evolution_base_id': base_id},  # Pass forward the base Pokemon ID
+                    on_complete_callback="rare_candy_evolve"
+                )
+                state.push_step(select_stage_2_step)
+
+        elif callback == "rare_candy_evolve":
+            # Execute the evolution directly (no need for another step)
+            from actions import evolve_pokemon
+            base_id = completed_step.context.get("evolution_base_id")
+            evolution_id = completed_step.context.get("evolution_card_id")
+            if base_id and evolution_id:
+                state = evolve_pokemon(
+                    state,
+                    completed_step.player_id,
+                    base_id,
+                    evolution_id,
+                    skip_stage=True  # Rare Candy allows skipping Stage 1
+                )
+
+        elif callback == "attach_energy_select_target":
+            # Push an AttachToTargetStep after energy was selected
+            # The selected energy ID is stored in the completed step's context
+            energy_id = None
+            if hasattr(completed_step, 'selected_card_ids') and completed_step.selected_card_ids:
+                energy_id = completed_step.selected_card_ids[0]
+
+            if energy_id:
+                player = state.get_player(completed_step.player_id)
+
+                # Get list of valid target Pokemon IDs
+                valid_targets = [p.id for p in player.board.get_all_pokemon()]
+
+                # Get energy name for display
+                from cards.registry import create_card
+                energy_card = next((c for c in player.hand.cards if c.id == energy_id), None)
+                energy_name = "Energy"
+                if energy_card:
+                    energy_def = create_card(energy_card.card_id)
+                    if energy_def and hasattr(energy_def, 'name'):
+                        energy_name = energy_def.name
+
+                attach_step = AttachToTargetStep(
+                    source_card_id="attach_energy",
+                    source_card_name="Attach Energy",
+                    player_id=completed_step.player_id,
+                    purpose=SelectionPurpose.ATTACH_TARGET,
+                    card_to_attach_id=energy_id,
+                    card_to_attach_name=energy_name,
+                    valid_target_ids=valid_targets
+                )
+                state.push_step(attach_step)
+
+        return state
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:
         """

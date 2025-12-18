@@ -4,12 +4,10 @@ Set Code: SVI
 """
 
 from cards.library.trainers import (
-    rare_candy_effect,
-    rare_candy_actions,
+    nest_ball_effect,
+    nest_ball_actions,
     ultra_ball_effect,
     ultra_ball_actions,
-    nest_ball_effect,
-    nest_ball_actions
 )
 
 SV1_LOGIC = {
