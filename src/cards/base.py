@@ -930,6 +930,26 @@ class DataDrivenPokemon(PokemonCard):
 
         return attacks
 
+    @property
+    def abilities(self) -> List:
+        """
+        Get abilities as simple objects for engine compatibility.
+
+        Returns a list of ability objects with name and text attributes.
+        """
+        from collections import namedtuple
+        Ability = namedtuple('Ability', ['name', 'text', 'type'])
+
+        abilities = []
+        for ability_data in self.json_data.get('abilities', []):
+            abilities.append(Ability(
+                name=ability_data.get('name', ''),
+                text=ability_data.get('text', ''),
+                type=ability_data.get('type', 'Ability')
+            ))
+
+        return abilities
+
     def get_attacks(self, state: 'GameState', card_instance: 'CardInstance') -> List[Dict]:
         """
         Get attacks from JSON, with logic from registry.

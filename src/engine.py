@@ -1070,6 +1070,13 @@ class PokemonEngine:
         player = state.get_active_player()
         actions = []
 
+        # ACTION 0: Pass Turn (end turn without attacking)
+        actions.append(Action(
+            action_type=ActionType.END_TURN,
+            player_id=player.player_id,
+            metadata={"pass_turn": True}
+        ))
+
         # ACTION 1: Attach Energy (Constitution Section 2, Phase 2)
         if not player.energy_attached_this_turn:
             energy_actions = self._get_attach_energy_actions(state)
@@ -1122,13 +1129,6 @@ class PokemonEngine:
             active = player.board.active_spot
             attack_actions = self._get_attack_actions(state, active)
             actions.extend(attack_actions)
-
-        # ACTION 9: Pass Turn (end turn without attacking)
-        actions.append(Action(
-            action_type=ActionType.END_TURN,
-            player_id=player.player_id,
-            metadata={"pass_turn": True}
-        ))
 
         return actions
 
@@ -1858,6 +1858,8 @@ class PokemonEngine:
             return self._apply_confirm_selection(state, action)
         elif action.action_type == ActionType.CANCEL_ACTION:
             return self._apply_cancel_action(state, action)
+        elif action.action_type == ActionType.USE_ABILITY:
+            return self._apply_use_ability(state, action)
         else:
             # Unknown action type
             return state
@@ -2127,6 +2129,51 @@ class PokemonEngine:
 
         # Attach tool to target
         target_pokemon.attached_tools.append(tool_card)
+
+        return state
+
+    def _apply_use_ability(self, state: GameState, action: Action) -> GameState:
+        """
+        Apply a Pokémon ability effect.
+
+        Looks up the ability's effect function in the logic registry and executes it.
+
+        Args:
+            state: Current game state
+            action: USE_ABILITY action with card_id and ability_name
+
+        Returns:
+            Modified GameState after ability effect
+        """
+        from cards import logic_registry
+
+        player = state.get_player(action.player_id)
+
+        # Find the Pokemon using the ability
+        pokemon = None
+        for p in player.board.get_all_pokemon():
+            if p.id == action.card_id:
+                pokemon = p
+                break
+
+        if not pokemon:
+            return state
+
+        # Get ability name from action
+        ability_name = action.ability_name or action.metadata.get('ability_name', '')
+
+        if not ability_name:
+            return state
+
+        # Look up the effect function in logic registry
+        card_logic = logic_registry.get_card_logic(pokemon.card_id, ability_name)
+
+        if isinstance(card_logic, dict) and 'effect' in card_logic:
+            effect_func = card_logic['effect']
+            state = effect_func(state, pokemon, action)
+        else:
+            # No custom effect - mark as used for once-per-turn abilities
+            pokemon.abilities_used_this_turn.add(ability_name)
 
         return state
 
@@ -3412,8 +3459,14 @@ class PokemonEngine:
                 winner.hand.add_card(prize)
                 winner.prizes_taken += 1
 
-        # Set metadata flag for history tracking (Fezandipiti ex)
+        # Set metadata flag for history tracking (Fezandipiti ex, Retaliate attacks, etc.)
         state.turn_metadata['pokemon_knocked_out'] = True
+        # Track which player's Pokemon were knocked out (for "if any of YOUR Pokemon were KO'd" effects)
+        # Using list instead of set for Pydantic serialization compatibility
+        if 'knocked_out_player_ids' not in state.turn_metadata:
+            state.turn_metadata['knocked_out_player_ids'] = []
+        if knocked_out.owner_id not in state.turn_metadata['knocked_out_player_ids']:
+            state.turn_metadata['knocked_out_player_ids'].append(knocked_out.owner_id)
 
         # 4 Pillars: Check for "on_knockout" triggers
         # Example: Retaliate attack bonus, Avenge attack bonus, knockout-triggered abilities
