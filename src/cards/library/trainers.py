@@ -12,7 +12,10 @@ Action generators follow the signature:
 """
 
 from typing import List
-from models import GameState, CardInstance, Action, ActionType, Subtype, PlayerState
+from models import (
+    GameState, CardInstance, Action, ActionType, Subtype, PlayerState,
+    SearchDeckStep, ZoneType, SelectionPurpose
+)
 from cards.factory import get_card_definition
 from cards.base import PokemonCard
 
@@ -361,5 +364,116 @@ def professors_research_effect(state: GameState, card: CardInstance, action: Act
         if not player.deck.is_empty():
             drawn_card = player.deck.cards.pop(0)
             player.hand.add_card(drawn_card)
+
+    return state
+
+
+# ============================================================================
+# DAWN - SUPPORTER (me2-87, me2-118, me2-129)
+# ============================================================================
+
+def dawn_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Dawn supporter card.
+
+    Dawn: Search your deck for a Basic Pokemon, a Stage 1 Pokemon, and a
+    Stage 2 Pokemon, reveal them, and put them into your hand. Then, shuffle
+    your deck.
+
+    Args:
+        state: Current game state
+        card: Dawn CardInstance
+        player: PlayerState of the player
+
+    Returns:
+        List with single action to play Dawn
+    """
+    # Dawn is always playable (can fail to find any/all of the Pokemon)
+    return [Action(
+        action_type=ActionType.PLAY_SUPPORTER,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Dawn (search Basic + Stage 1 + Stage 2)"
+    )]
+
+
+def dawn_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Dawn supporter effect.
+
+    Search your deck for a Basic Pokemon, a Stage 1 Pokemon, and a Stage 2
+    Pokemon, reveal them, and put them into your hand. Then, shuffle your deck.
+
+    Uses Stack Architecture with 3 sequential SearchDeckStep calls.
+    Steps are pushed in reverse order (LIFO) so they resolve:
+    1. Search for Basic Pokemon
+    2. Search for Stage 1 Pokemon
+    3. Search for Stage 2 Pokemon (with shuffle_after=True)
+
+    Args:
+        state: Current game state
+        card: Dawn CardInstance
+        action: Play supporter action
+
+    Returns:
+        Modified GameState with search steps pushed
+    """
+    player = state.get_player(action.player_id)
+
+    # Push steps in reverse order (LIFO - last pushed = first resolved)
+
+    # Step 3: Search for Stage 2 Pokemon (shuffle after this one)
+    search_stage2_step = SearchDeckStep(
+        source_card_id=card.id,
+        source_card_name="Dawn",
+        player_id=player.player_id,
+        purpose=SelectionPurpose.SEARCH_TARGET,
+        count=1,
+        min_count=0,  # Can fail to find
+        destination=ZoneType.HAND,
+        filter_criteria={
+            'supertype': 'Pokemon',
+            'subtype': 'Stage 2'
+        },
+        shuffle_after=True,  # Shuffle after the final search
+        reveal_cards=True
+    )
+    state.push_step(search_stage2_step)
+
+    # Step 2: Search for Stage 1 Pokemon
+    search_stage1_step = SearchDeckStep(
+        source_card_id=card.id,
+        source_card_name="Dawn",
+        player_id=player.player_id,
+        purpose=SelectionPurpose.SEARCH_TARGET,
+        count=1,
+        min_count=0,  # Can fail to find
+        destination=ZoneType.HAND,
+        filter_criteria={
+            'supertype': 'Pokemon',
+            'subtype': 'Stage 1'
+        },
+        shuffle_after=False,  # Don't shuffle yet
+        reveal_cards=True
+    )
+    state.push_step(search_stage1_step)
+
+    # Step 1: Search for Basic Pokemon (first to resolve)
+    search_basic_step = SearchDeckStep(
+        source_card_id=card.id,
+        source_card_name="Dawn",
+        player_id=player.player_id,
+        purpose=SelectionPurpose.SEARCH_TARGET,
+        count=1,
+        min_count=0,  # Can fail to find
+        destination=ZoneType.HAND,
+        filter_criteria={
+            'supertype': 'Pokemon',
+            'subtype': 'Basic'
+        },
+        shuffle_after=False,  # Don't shuffle yet
+        reveal_cards=True
+    )
+    state.push_step(search_basic_step)
 
     return state

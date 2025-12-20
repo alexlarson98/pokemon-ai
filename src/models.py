@@ -476,8 +476,21 @@ class GameState(BaseModel):
         return None
 
     def push_step(self, step: 'ResolutionStep') -> None:
-        """Push a new resolution step onto the stack."""
+        """Push a new resolution step onto the stack.
+
+        When a SearchDeckStep is pushed, automatically marks the player's
+        has_searched_deck flag as True. This ensures the knowledge layer
+        knows the player has perfect information about their deck contents
+        (i.e., they can see what's actually in deck vs. prized).
+        """
         self.resolution_stack.append(step)
+
+        # When a search step is pushed, mark that player has searched deck
+        # This gives them perfect knowledge of deck contents (vs prized cards)
+        if hasattr(step, 'step_type') and step.step_type == StepType.SEARCH_DECK:
+            player = self.get_player(step.player_id)
+            if player:
+                player.has_searched_deck = True
 
     def pop_step(self) -> Optional['ResolutionStep']:
         """Pop and return the top resolution step."""

@@ -1,0 +1,82 @@
+# Dawn Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** me2-87, me2-118, me2-129 | **Type:** Trainer (Supporter) | **HP:** N/A
+
+### Feature: play (ACTION)
+_Search your deck for a Basic Pokemon, a Stage 1 Pokemon, and a Stage 2 Pokemon, reveal them, and put them into your hand. Then, shuffle your deck. You may play only 1 Supporter card during your turn._
+
+- Implement `dawn_actions(state, card, player)` (Generator)
+- Implement `dawn_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Registry (`me2.py`)
+```python
+ME2_LOGIC = {
+    "me2-87": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
+        },
+    },
+    "me2-118": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
+        },
+    },
+    "me2-129": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
+        },
+    },
+}
+```
+

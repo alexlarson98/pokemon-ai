@@ -6,8 +6,14 @@ This module contains card-specific logic for the Phantasmal Flames set.
 """
 
 from typing import List
-from models import GameState, CardInstance, Action, ActionType, PlayerState
+from models import (
+    GameState, CardInstance, Action, ActionType, PlayerState,
+)
 from actions import apply_damage, calculate_damage
+from cards.library.trainers import (
+    dawn_effect,
+    dawn_actions,
+)
 
 
 # ============================================================================
@@ -164,7 +170,6 @@ def charmeleon_steady_firebreathing_effect(state: GameState, card: CardInstance,
 
     return state
 
-
 # ============================================================================
 # ME2 LOGIC REGISTRY
 # ============================================================================
@@ -193,6 +198,29 @@ ME2_LOGIC = {
             "category": "attack",
             "generator": charmeleon_steady_firebreathing_actions,
             "effect": charmeleon_steady_firebreathing_effect,
+        },
+    },
+
+    # Dawn - Supporter (search for Basic + Stage 1 + Stage 2)
+    "me2-87": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
+        },
+    },
+    "me2-118": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
+        },
+    },
+    "me2-129": {
+        "Play Dawn": {
+            "category": "activatable",
+            "generator": dawn_actions,
+            "effect": dawn_effect,
         },
     },
 }
