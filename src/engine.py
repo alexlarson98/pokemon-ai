@@ -3271,6 +3271,38 @@ class PokemonEngine:
 
         return state
 
+    def is_ability_blocked(
+        self,
+        state: GameState,
+        pokemon: CardInstance,
+        ability_name: str
+    ) -> bool:
+        """
+        Check if a specific ability on a Pokemon is blocked.
+
+        This is a convenience wrapper around check_global_permission for ability checks.
+        Use this when checking if modifier/passive abilities can apply their effects.
+
+        Args:
+            state: Current game state
+            pokemon: The Pokemon whose ability is being checked
+            ability_name: Name of the ability to check
+
+        Returns:
+            True if the ability is BLOCKED (cannot be used), False if allowed
+
+        Examples:
+            >>> # Check if Charmander's Agile ability is blocked by Klefki
+            >>> if not engine.is_ability_blocked(state, charmander, "Agile"):
+            >>>     # Apply the Agile retreat cost modifier
+            >>>     retreat_cost = 0
+        """
+        return not self.check_global_permission(
+            state,
+            "ability",
+            {"card_id": pokemon.id, "player_id": pokemon.owner_id, "ability_name": ability_name}
+        )
+
     def check_global_permission(
         self,
         state: GameState,
@@ -3472,7 +3504,7 @@ class PokemonEngine:
             >>>     "source": "hand"
             >>> })
         """
-        from cards.logic_registry import get_card_hooks
+        from cards.logic_registry import get_card_hooks, get_hook_ability_name
 
         triggered_actions = []
 
@@ -3480,15 +3512,21 @@ class PokemonEngine:
         for player in state.players:
             # Check active Pokémon
             if player.board.active_spot:
-                hook = get_card_hooks(player.board.active_spot.card_id, event_type)
+                pokemon = player.board.active_spot
+                hook = get_card_hooks(pokemon.card_id, event_type)
                 if hook:
+                    # Check if this hook's ability is blocked (e.g., by Klefki)
+                    ability_name = get_hook_ability_name(pokemon.card_id, event_type)
+                    if ability_name and self.is_ability_blocked(state, pokemon, ability_name):
+                        continue  # Hook is blocked, skip it
+
                     # Add context about which card triggered
                     hook_context = {
                         **context,
-                        "trigger_card": player.board.active_spot,
+                        "trigger_card": pokemon,
                         "trigger_player_id": player.player_id
                     }
-                    result = hook(state, player.board.active_spot, hook_context)
+                    result = hook(state, pokemon, hook_context)
                     if isinstance(result, list):
                         triggered_actions.extend(result)
                     elif isinstance(result, Action):
@@ -3499,6 +3537,11 @@ class PokemonEngine:
                 if bench_pokemon:
                     hook = get_card_hooks(bench_pokemon.card_id, event_type)
                     if hook:
+                        # Check if this hook's ability is blocked (e.g., by Klefki)
+                        ability_name = get_hook_ability_name(bench_pokemon.card_id, event_type)
+                        if ability_name and self.is_ability_blocked(state, bench_pokemon, ability_name):
+                            continue  # Hook is blocked, skip it
+
                         hook_context = {
                             **context,
                             "trigger_card": bench_pokemon,
@@ -3846,10 +3889,15 @@ class PokemonEngine:
 
         # Step 3: Apply LOCAL modifiers (4 Pillars: card's own abilities)
         # Example: Charmander's "Agile" - retreat cost = 0 if no Energy attached
+        # CRITICAL: Must check if Pokemon's abilities are blocked (e.g., by Klefki's Mischievous Lock)
+        from cards.logic_registry import get_modifier_ability_name
         card_modifier = get_card_modifier(pokemon.card_id, "retreat_cost")
         if card_modifier:
-            # Modifier function signature: fn(state, card, current_cost) -> new_cost
-            current_cost = card_modifier(state, pokemon, current_cost)
+            # Get the ability name for this modifier and check if it's blocked
+            ability_name = get_modifier_ability_name(pokemon.card_id, "retreat_cost")
+            if not ability_name or not self.is_ability_blocked(state, pokemon, ability_name):
+                # Modifier function signature: fn(state, card, current_cost) -> new_cost
+                current_cost = card_modifier(state, pokemon, current_cost)
 
         # Step 4: Apply GLOBAL modifiers (4 Pillars: board-wide effects)
         # Example: Beach Court Stadium - all Basic Pokémon retreat cost -1

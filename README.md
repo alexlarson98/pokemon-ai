@@ -823,6 +823,172 @@ ME2_LOGIC = {
 
 ---
 
+## Ability Blocking System
+
+Some Pokemon have abilities that block other abilities (e.g., Klefki's "Mischievous Lock" blocks all Basic Pokemon abilities). The engine provides a unified system for checking and applying ability blocks.
+
+### Key Helper Methods
+
+#### `is_ability_blocked(state, pokemon, ability_name)` (engine.py)
+
+Check if a specific ability on a Pokemon is blocked by any active effects.
+
+```python
+# Check if Charmander's Agile ability is blocked by Klefki
+if not engine.is_ability_blocked(state, charmander, "Agile"):
+    # Apply the Agile retreat cost modifier
+    retreat_cost = 0
+```
+
+**Returns:** `True` if the ability is BLOCKED (cannot be used), `False` if allowed.
+
+**Use Cases:**
+- Before applying modifier abilities (retreat cost, damage modifiers)
+- Before applying passive effects
+- Checking if activatable abilities can be used
+- Before triggering hooks (on_play_pokemon, on_evolve, etc.)
+
+#### `get_modifier_ability_name(card_id, modifier_type)` (logic_registry.py)
+
+Get the ability name that provides a specific modifier type. Used to check ability blocking before applying modifiers.
+
+```python
+from cards.logic_registry import get_modifier_ability_name
+
+# Find which ability provides retreat cost modification
+ability_name = get_modifier_ability_name("me2-11", "retreat_cost")
+# Returns: "Agile"
+```
+
+#### `get_hook_ability_name(card_id, hook_type)` (logic_registry.py)
+
+Get the ability name that provides a specific hook type. Used to check ability blocking before triggering hooks.
+
+```python
+from cards.logic_registry import get_hook_ability_name
+
+# Find which ability provides the on_evolve hook
+ability_name = get_hook_ability_name("sv4pt5-54", "on_evolve")
+# Returns: "Infernal Reign"
+
+# Find which ability provides the on_play_pokemon hook
+ability_name = get_hook_ability_name("some-card", "on_play_pokemon")
+# Returns: "Mill Top Card" (or whatever the ability is named)
+```
+
+#### `is_ability_blocked_by_passive(state, pokemon, ability_name)` (logic_registry.py)
+
+Standalone function to check if an ability is blocked by passive ability blockers. Can be used without an engine instance.
+
+```python
+from cards.logic_registry import is_ability_blocked_by_passive
+
+# Check if a Basic Pokemon's ability is blocked by Klefki
+if is_ability_blocked_by_passive(state, basic_pokemon, "Mill Top Card"):
+    return  # Ability is blocked, skip it
+```
+
+#### `check_global_permission(state, action_type, context)` (engine.py)
+
+Low-level permission check used by `is_ability_blocked`. Checks active effects and passive ability blockers.
+
+```python
+# Check if playing an item is allowed
+can_play = engine.check_global_permission(state, "play_item", {"player_id": 0})
+
+# Check if a specific ability is allowed
+can_use = engine.check_global_permission(state, "ability", {
+    "card_id": pokemon.id,
+    "player_id": pokemon.owner_id,
+    "ability_name": "Agile"
+})
+```
+
+### How Ability Blocking Works
+
+1. **Passive Ability Blockers** (e.g., Klefki's Mischievous Lock):
+   - Registered with `category: "passive"` and `effect_type: "ability_lock"`
+   - Engine scans both players' Active Spots for blockers
+   - Blocker's `condition` function checks if blocking is active (e.g., "in Active Spot")
+   - Blocker's `effect` function determines if specific ability is blocked
+
+2. **Applying Modifiers with Blocking Check**:
+```python
+# In calculate_retreat_cost():
+card_modifier = get_card_modifier(pokemon.card_id, "retreat_cost")
+if card_modifier:
+    ability_name = get_modifier_ability_name(pokemon.card_id, "retreat_cost")
+    if not ability_name or not self.is_ability_blocked(state, pokemon, ability_name):
+        current_cost = card_modifier(state, pokemon, current_cost)
+```
+
+3. **Triggering Hooks with Blocking Check**:
+```python
+# In _check_triggers() and evolve_pokemon():
+hook = get_card_hooks(pokemon.card_id, event_type)
+if hook:
+    ability_name = get_hook_ability_name(pokemon.card_id, event_type)
+    if ability_name and is_ability_blocked(state, pokemon, ability_name):
+        continue  # Hook is blocked, skip it
+    # ... trigger the hook
+```
+
+4. **Example: Klefki Blocking Charmander's Agile**
+```python
+# Klefki in Active Spot blocks all Basic Pokemon abilities
+# Charmander (Basic) has "Agile" ability that reduces retreat cost
+
+# Without Klefki: Charmander retreat cost = 0 (Agile works)
+# With Klefki in Active: Charmander retreat cost = 2 (Agile blocked)
+```
+
+5. **Example: Klefki Blocking On-Play Hooks**
+```python
+# Klefki in Active Spot blocks all Basic Pokemon abilities
+# A Basic Pokemon with "Mill Top Card" on-play hook is played
+
+# Without Klefki: Hook triggers, discards top card of opponent's deck
+# With Klefki in Active: Hook is blocked, nothing happens
+```
+
+### Implementing an Ability Blocker
+
+```python
+# 1. Condition check: When is the block active?
+def klefki_mischievous_lock_condition(state, klefki_card):
+    """Returns True when Klefki is in Active Spot."""
+    owner = state.get_player(klefki_card.owner_id)
+    return owner.board.active_spot and owner.board.active_spot.id == klefki_card.id
+
+# 2. Effect: Which abilities are blocked?
+def klefki_mischievous_lock_effect(state, klefki_card, target_card, ability_name):
+    """Returns True if the ability should be blocked."""
+    # Don't block itself
+    if ability_name == "Mischievous Lock":
+        return False
+    # Only block Basic Pokemon
+    card_def = create_card(target_card.card_id)
+    if card_def and Subtype.BASIC in card_def.subtypes:
+        return True  # Block this ability
+    return False
+
+# 3. Register
+SV1_LOGIC = {
+    "sv1-96": {
+        "Mischievous Lock": {
+            "category": "passive",
+            "condition_type": "in_active_spot",
+            "effect_type": "ability_lock",
+            "scope": "all_basic_pokemon",
+            "condition": klefki_mischievous_lock_condition,
+            "effect": klefki_mischievous_lock_effect,
+        },
+    },
+}
+```
+
+---
+
 ## Testing
 
 ### Run All Tests

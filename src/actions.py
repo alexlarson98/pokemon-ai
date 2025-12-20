@@ -984,25 +984,36 @@ def evolve_pokemon(
 
     # 4 Pillars: Trigger "on_evolve" hooks
     # Example: Cards that respond to evolution events
-    from cards.logic_registry import get_card_hooks
+    from cards.logic_registry import get_card_hooks, get_hook_ability_name, is_ability_blocked_by_passive
     for p in state.players:
         # Check active
         if p.board.active_spot:
-            hook = get_card_hooks(p.board.active_spot.card_id, "on_evolve")
+            pokemon = p.board.active_spot
+            hook = get_card_hooks(pokemon.card_id, "on_evolve")
             if hook:
+                # Check if this hook's ability is blocked (e.g., by Klefki)
+                ability_name = get_hook_ability_name(pokemon.card_id, "on_evolve")
+                if ability_name and is_ability_blocked_by_passive(state, pokemon, ability_name):
+                    continue  # Hook is blocked, skip it
+
                 hook_context = {
                     "evolved_pokemon": evolution_card,
                     "previous_stage": target,
                     "player_id": player_id,
-                    "trigger_card": p.board.active_spot,
+                    "trigger_card": pokemon,
                     "trigger_player_id": p.player_id
                 }
-                hook(state, p.board.active_spot, hook_context)
+                hook(state, pokemon, hook_context)
         # Check bench
         for bench_pokemon in p.board.bench:
             if bench_pokemon:
                 hook = get_card_hooks(bench_pokemon.card_id, "on_evolve")
                 if hook:
+                    # Check if this hook's ability is blocked (e.g., by Klefki)
+                    ability_name = get_hook_ability_name(bench_pokemon.card_id, "on_evolve")
+                    if ability_name and is_ability_blocked_by_passive(state, bench_pokemon, ability_name):
+                        continue  # Hook is blocked, skip it
+
                     hook_context = {
                         "evolved_pokemon": evolution_card,
                         "previous_stage": target,

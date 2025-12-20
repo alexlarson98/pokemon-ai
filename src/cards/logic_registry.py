@@ -346,6 +346,58 @@ def get_card_modifier(card_id: str, modifier_type: str) -> Optional[Callable]:
     return None
 
 
+def get_modifier_ability_name(card_id: str, modifier_type: str) -> Optional[str]:
+    """
+    Get the ability name that provides a specific modifier type.
+
+    Used to check if the ability is blocked before applying its modifier.
+
+    Args:
+        card_id: The card's ID (e.g., "me2-11" for Charmander)
+        modifier_type: Type of modifier (e.g., "retreat_cost", "damage", "hp")
+
+    Returns:
+        The ability name (e.g., "Agile") or None if not found.
+
+    Example:
+        >>> ability_name = get_modifier_ability_name("me2-11", "retreat_cost")
+        >>> # Returns "Agile"
+    """
+    card_data = MASTER_LOGIC_REGISTRY.get(card_id)
+    if isinstance(card_data, dict):
+        for key, value in card_data.items():
+            if isinstance(value, dict) and value.get('category') == 'modifier':
+                if value.get('modifier_type') == modifier_type:
+                    return key
+    return None
+
+
+def get_hook_ability_name(card_id: str, hook_type: str) -> Optional[str]:
+    """
+    Get the ability name that provides a specific hook type.
+
+    Used to check if the ability is blocked before triggering its hook.
+
+    Args:
+        card_id: The card's ID (e.g., "sv4pt5-54" for Charizard ex)
+        hook_type: Type of hook (e.g., "on_play_pokemon", "on_evolve", "on_knockout")
+
+    Returns:
+        The ability name (e.g., "Infernal Reign") or None if not found.
+
+    Example:
+        >>> ability_name = get_hook_ability_name("sv4pt5-54", "on_evolve")
+        >>> # Returns "Infernal Reign"
+    """
+    card_data = MASTER_LOGIC_REGISTRY.get(card_id)
+    if isinstance(card_data, dict):
+        for key, value in card_data.items():
+            if isinstance(value, dict) and value.get('category') == 'hook':
+                if value.get('trigger') == hook_type:
+                    return key
+    return None
+
+
 def get_card_guard(card_id: str, guard_type: str) -> Optional[Callable]:
     """
     Get a guard function for a card.
@@ -604,6 +656,52 @@ def check_global_block(state: 'GameState', guard_type: str, context: dict = None
     """
     guards = scan_global_guards(state, guard_type, context)
     return any(is_blocking for _, _, is_blocking in guards)
+
+
+def is_ability_blocked_by_passive(
+    state: 'GameState',
+    pokemon: 'CardInstance',
+    ability_name: str
+) -> bool:
+    """
+    Check if a specific ability on a Pokemon is blocked by passive ability blockers.
+
+    This is a standalone function that can be used without an engine instance.
+    It checks both players' Active Spots for passive ability locks (e.g., Klefki).
+
+    Args:
+        state: Current game state
+        pokemon: The Pokemon whose ability is being checked
+        ability_name: Name of the ability to check
+
+    Returns:
+        True if the ability is BLOCKED (cannot be used), False if allowed
+
+    Example:
+        >>> # Check if Charmander's on-play ability is blocked by Klefki
+        >>> if is_ability_blocked_by_passive(state, charmander, "Mill Top Card"):
+        >>>     return  # Hook is blocked, skip it
+    """
+    # Check BOTH players' Active Spots for passive ability blockers
+    for player in state.players:
+        if player.board.active_spot:
+            active_pokemon = player.board.active_spot
+
+            # Check if this Active Pokemon has a passive ability lock
+            card_logic = MASTER_LOGIC_REGISTRY.get(active_pokemon.card_id, {})
+
+            for blocker_ability_name, ability_info in card_logic.items():
+                if isinstance(ability_info, dict) and ability_info.get('category') == 'passive':
+                    if ability_info.get('effect_type') == 'ability_lock':
+                        # Check if condition is met
+                        condition_fn = ability_info.get('condition')
+                        if condition_fn and condition_fn(state, active_pokemon):
+                            # Check if effect blocks this ability
+                            effect_fn = ability_info.get('effect')
+                            if effect_fn and effect_fn(state, active_pokemon, pokemon, ability_name):
+                                return True  # Ability is blocked
+
+    return False  # Ability is allowed
 
 
 # ============================================================================
