@@ -19,6 +19,10 @@ from .sv6pt5 import (
     dusclops_cursed_blast_effect,
     dusclops_will_o_wisp_actions,
     dusclops_will_o_wisp_effect,
+    dusknoir_cursed_blast_actions,
+    dusknoir_cursed_blast_effect,
+    dusknoir_shadow_bind_actions,
+    dusknoir_shadow_bind_effect,
 )
 from cards.library.trainers import (
     professors_research_actions,
@@ -143,6 +147,20 @@ SV8PT5_LOGIC = {
             "category": "attack",
             "generator": dusclops_will_o_wisp_actions,
             "effect": dusclops_will_o_wisp_effect,
+        },
+    },
+
+    # Dusknoir - Reprint from sv6pt5
+    "sv8pt5-37": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusknoir_cursed_blast_actions,
+            "effect": dusknoir_cursed_blast_effect,
+        },
+        "Shadow Bind": {
+            "category": "attack",
+            "generator": dusknoir_shadow_bind_actions,
+            "effect": dusknoir_shadow_bind_effect,
         },
     },
 

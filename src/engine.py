@@ -1599,6 +1599,11 @@ class PokemonEngine:
         if StatusCondition.PARALYZED in active.status_conditions:
             return actions  # Can't retreat if Paralyzed
 
+        # Check attack effects that prevent retreat (e.g., Shadow Bind)
+        for effect in active.attack_effects:
+            if isinstance(effect, dict) and effect.get('effect_type') == 'prevent_retreat':
+                return actions  # Can't retreat due to attack effect
+
         # Must have Bench to retreat to
         if player.board.get_bench_count() == 0:
             return actions
@@ -3182,7 +3187,7 @@ class PokemonEngine:
 
     def _resolve_effect_expiration(self, state: GameState) -> GameState:
         """
-        Remove expired effects from active_effects list.
+        Remove expired effects from active_effects list and per-Pokemon attack_effects.
 
         Called during cleanup phase to remove effects that have expired.
 
@@ -3196,13 +3201,31 @@ class PokemonEngine:
         current_player = state.active_player_index
         current_phase = state.current_phase.value
 
-        # Filter out expired effects
+        # Filter out expired effects from global active_effects
         active_effects = []
         for effect in state.active_effects:
             if not effect.is_expired(current_turn, current_player, current_phase):
                 active_effects.append(effect)
 
         state.active_effects = active_effects
+
+        # Filter out expired attack_effects on individual Pokemon
+        # Effects with expires_at_end_of_turn=True and expires_player_id matching
+        # the current player (whose turn is ending) should be removed
+        ending_player_id = state.active_player_index
+        for player in state.players:
+            for pokemon in player.board.get_all_pokemon():
+                if pokemon.attack_effects:
+                    remaining_effects = []
+                    for effect in pokemon.attack_effects:
+                        if isinstance(effect, dict):
+                            # Check if effect should expire
+                            if effect.get('expires_at_end_of_turn') and effect.get('expires_player_id') == ending_player_id:
+                                # This effect expires now - don't keep it
+                                continue
+                        remaining_effects.append(effect)
+                    pokemon.attack_effects = remaining_effects
+
         return state
 
     def check_global_permission(
