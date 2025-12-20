@@ -135,6 +135,13 @@ BASIC_POKEMON = [
     "sv5-126",     # Hoothoot (70 HP, Silent Wing)
     "sv7-114",     # Hoothoot (70 HP, Triple Stab)
     "sv8pt5-77",   # Hoothoot (80 HP, Tackle + Insomnia ability)
+    "sv1-96",      # Klefki (70 HP, Mischievous Lock + Joust)
+    "sv4pt5-159",  # Klefki (70 HP, Mischievous Lock + Joust) - reprint
+    "sv8-128",     # Klefki (70 HP, Stick 'n' Draw + Hook)
+    "sv7-118",     # Fan Rotom (90 HP, Fan Call + Assault Landing)
+    "sv8pt5-85",   # Fan Rotom (90 HP, Fan Call + Assault Landing) - reprint
+    "sv7-128",     # Terapagos ex (130 HP, Unified Beatdown + Crown Opal)
+    "svp-165",     # Terapagos ex (130 HP, Unified Beatdown + Crown Opal)
 ]
 
 STAGE_1_POKEMON = [
@@ -145,6 +152,8 @@ STAGE_1_POKEMON = [
 
 STAGE_2_POKEMON = [
     "sv3-125",     # Charizard ex (Stage 2)
+    "sv3-164",     # Pidgeot ex (Stage 2, Quick Search + Blustery Wind)
+    "sv4pt5-221",  # Pidgeot ex (Stage 2, Quick Search + Blustery Wind) - reprint
 ]
 
 TRAINER_ITEMS = [
@@ -156,6 +165,8 @@ TRAINER_ITEMS = [
 
 TRAINER_SUPPORTERS = [
     "sv2-185",     # Iono
+    "sv7-132",     # Briar (+1 prize if Tera KOs Active when opponent has 2 prizes)
+    "me2-87",      # Dawn (search Basic + Stage 1 + Stage 2)
 ]
 
 BASIC_ENERGY = [

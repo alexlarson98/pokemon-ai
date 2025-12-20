@@ -810,9 +810,11 @@ class TestEdgeCases:
     def test_all_energy_hand_discard(self, engine):
         """
         Hand with all energy cards (+ Ultra Ball) should work.
+        Note: Identical cards are deduplicated by functional ID for discard,
+        so we use different energy types to get 3 unique options.
         """
         state = create_ultra_ball_state(
-            hand_cards=["sve-2", "sve-2", "sve-3"],  # 3 energy cards
+            hand_cards=["sve-2", "sve-3", "sv1-258"],  # Fire, Water, Fighting (3 different)
             deck_cards=["sv4pt5-7"],
         )
         state = engine.initialize_deck_knowledge(state)
@@ -824,7 +826,7 @@ class TestEdgeCases:
         play_action = next(a for a in actions if a.action_type == ActionType.PLAY_ITEM and a.card_id == ultra_ball.id)
         state = engine.step(state, play_action)
 
-        # Should have 3 energy cards to choose from for discard
+        # Should have 3 energy cards to choose from for discard (one per unique type)
         actions = engine.get_legal_actions(state)
         select_actions = [a for a in actions if a.action_type == ActionType.SELECT_CARD]
         assert len(select_actions) == 3, "Should have 3 energy cards to discard"

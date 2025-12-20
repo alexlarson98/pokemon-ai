@@ -399,16 +399,18 @@ class TestUltraBallStackMechanics:
         state = engine.initialize_deck_knowledge(state)
         player = state.players[0]
 
-        # Clear hand and set up exactly: Ultra Ball + 2 other cards
+        # Clear hand and set up exactly: Ultra Ball + 2 other cards (DIFFERENT cards)
+        # Using different cards to properly test exclusion since identical cards
+        # are deduplicated by functional ID
         player.hand.cards.clear()
 
         ultra_ball = create_card_instance("sv1-196", owner_id=0)  # Ultra Ball
-        iono1 = create_card_instance("sv2-185", owner_id=0)        # Iono (Supporter)
-        iono2 = create_card_instance("sv2-185", owner_id=0)        # Iono (Supporter)
+        iono = create_card_instance("sv2-185", owner_id=0)         # Iono (Supporter)
+        charmander = create_card_instance("svp-44", owner_id=0)    # Charmander (Pokemon)
 
         player.hand.add_card(ultra_ball)
-        player.hand.add_card(iono1)
-        player.hand.add_card(iono2)
+        player.hand.add_card(iono)
+        player.hand.add_card(charmander)
 
         # Get initial actions - should include PLAY_ITEM for Ultra Ball
         actions = engine.get_legal_actions(state)
@@ -428,14 +430,14 @@ class TestUltraBallStackMechanics:
         actions = engine.get_legal_actions(state)
         select_actions = [a for a in actions if a.action_type == ActionType.SELECT_CARD]
 
-        # Should have exactly 2 options (the two Ionos), NOT Ultra Ball
+        # Should have exactly 2 options (Iono and Charmander), NOT Ultra Ball
         assert len(select_actions) == 2, f"Should have 2 discard options, got {len(select_actions)}"
 
         # Verify Ultra Ball is NOT among the options
         select_card_ids = [a.card_id for a in select_actions]
         assert ultra_ball.id not in select_card_ids, "Ultra Ball should NOT be a discard option"
-        assert iono1.id in select_card_ids, "Iono1 should be a discard option"
-        assert iono2.id in select_card_ids, "Iono2 should be a discard option"
+        assert iono.id in select_card_ids, "Iono should be a discard option"
+        assert charmander.id in select_card_ids, "Charmander should be a discard option"
 
     def test_ultra_ball_with_two_ultra_balls_in_hand(self, engine, basic_game_state):
         """With 2 Ultra Balls, the one NOT being played CAN be discarded."""
