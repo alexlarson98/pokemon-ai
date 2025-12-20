@@ -2326,6 +2326,802 @@ class TestEvolvedPokemonKnockout:
 
 
 # =============================================================================
+# FEZANDIPITI EX FUZZING TESTS
+# =============================================================================
+
+class TestFezandipitiExFuzzing:
+    """
+    Fuzz testing for Fezandipiti ex's Flip the Script ability.
+
+    Flip the Script:
+    - Once during your turn, if any of your Pokemon were Knocked Out during
+      your opponent's last turn, you may draw 3 cards.
+    - You can't use more than 1 Flip the Script Ability each turn.
+
+    Invariants tested:
+    1. Ability appears in legal actions when conditions are met
+    2. Always draws exactly 3 cards (or remaining deck if < 3)
+    3. Global restriction works (only 1 Flip the Script per turn total)
+    4. Works with any deck state
+    """
+
+    FEZANDIPITI_EX_ID = "sv6pt5-38"
+
+    @pytest.fixture
+    def engine(self):
+        return PokemonEngine()
+
+    def create_flip_the_script_state(
+        self,
+        deck_size: int,
+        hand_size: int,
+        bench_fez_count: int = 0,
+        ko_happened: bool = True,
+        seed: int = 42
+    ) -> GameState:
+        """
+        Create a game state where Flip the Script can be tested.
+
+        Args:
+            deck_size: Number of cards in deck
+            hand_size: Number of cards in hand
+            bench_fez_count: Number of Fezandipiti ex on bench (in addition to active)
+            ko_happened: Whether a KO happened last turn (triggers ability condition)
+            seed: Random seed for reproducibility
+        """
+        random.seed(seed)
+
+        player0 = PlayerState(player_id=0, name='Player 0')
+        player1 = PlayerState(player_id=1, name='Player 1')
+
+        # Fezandipiti ex as active
+        fez_active = create_card_instance(self.FEZANDIPITI_EX_ID, owner_id=0)
+        fez_active.turns_in_play = random.randint(1, 5)
+        player0.board.active_spot = fez_active
+
+        # Additional Fezandipiti ex on bench
+        for _ in range(bench_fez_count):
+            fez_bench = create_card_instance(self.FEZANDIPITI_EX_ID, owner_id=0)
+            fez_bench.turns_in_play = random.randint(1, 5)
+            player0.board.bench.append(fez_bench)
+
+        # Fill remaining bench with random Pokemon
+        remaining_bench = 5 - bench_fez_count
+        for _ in range(random.randint(0, remaining_bench)):
+            bench_mon = create_card_instance(random.choice(BASIC_POKEMON), owner_id=0)
+            bench_mon.turns_in_play = random.randint(1, 3)
+            player0.board.bench.append(bench_mon)
+
+        # Deck with random cards
+        for _ in range(deck_size):
+            player0.deck.add_card(create_card_instance(random.choice(ALL_CARDS), owner_id=0))
+
+        # Hand with random cards
+        for _ in range(hand_size):
+            player0.hand.add_card(create_card_instance(random.choice(ALL_CARDS), owner_id=0))
+
+        # Prizes
+        for _ in range(6):
+            player0.prizes.add_card(create_card_instance(random.choice(ALL_CARDS), owner_id=0))
+
+        # Opponent setup
+        player1.board.active_spot = create_card_instance("sv3pt5-16", owner_id=1)
+        for _ in range(6):
+            player1.prizes.add_card(create_card_instance(random.choice(ALL_CARDS), owner_id=1))
+        for _ in range(10):
+            player1.deck.add_card(create_card_instance(random.choice(ALL_CARDS), owner_id=1))
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=random.randint(2, 10),
+            active_player_index=0,
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+
+        # Set up last_turn_metadata to simulate KO condition
+        if ko_happened:
+            state.last_turn_metadata = {
+                'knocked_out_player_ids': [0],  # Player 0's Pokemon was KO'd
+                'pokemon_knocked_out': True
+            }
+        else:
+            state.last_turn_metadata = {}
+
+        return state
+
+    @pytest.mark.parametrize("seed", range(50))
+    def test_flip_the_script_always_available_when_conditions_met(self, engine, seed):
+        """
+        Flip the Script should ALWAYS appear in legal actions when:
+        - A Pokemon was KO'd last turn
+        - Deck has cards
+        - Ability hasn't been used this turn
+        """
+        deck_size = random.Random(seed).randint(3, 30)
+        hand_size = random.Random(seed).randint(0, 7)
+
+        state = self.create_flip_the_script_state(
+            deck_size=deck_size,
+            hand_size=hand_size,
+            ko_happened=True,
+            seed=seed
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        actions = engine.get_legal_actions(state)
+        ability_actions = [a for a in actions if a.action_type == ActionType.USE_ABILITY]
+        flip_actions = [a for a in ability_actions if a.ability_name == "Flip the Script"]
+
+        assert len(flip_actions) >= 1, (
+            f"Seed {seed}: Flip the Script should be available but wasn't found. "
+            f"Deck size: {deck_size}, Hand size: {hand_size}, "
+            f"last_turn_metadata: {state.last_turn_metadata}"
+        )
+
+    @pytest.mark.parametrize("seed", range(50))
+    def test_flip_the_script_draws_correct_cards(self, engine, seed):
+        """
+        Flip the Script should ALWAYS draw exactly 3 cards (or remaining deck).
+        """
+        random.seed(seed)
+        deck_size = random.randint(1, 30)  # Include edge cases with small decks
+        hand_size = random.randint(0, 7)
+
+        state = self.create_flip_the_script_state(
+            deck_size=deck_size,
+            hand_size=hand_size,
+            ko_happened=True,
+            seed=seed
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        initial_hand_size = len(state.players[0].hand.cards)
+        initial_deck_size = len(state.players[0].deck.cards)
+        expected_draw = min(3, initial_deck_size)
+
+        actions = engine.get_legal_actions(state)
+        flip_actions = [a for a in actions
+                        if a.action_type == ActionType.USE_ABILITY
+                        and a.ability_name == "Flip the Script"]
+
+        assert flip_actions, f"Seed {seed}: No Flip the Script action found"
+
+        # Execute the ability
+        state = engine.step(state, flip_actions[0])
+
+        final_hand_size = len(state.players[0].hand.cards)
+        final_deck_size = len(state.players[0].deck.cards)
+
+        cards_drawn = final_hand_size - initial_hand_size
+        cards_removed_from_deck = initial_deck_size - final_deck_size
+
+        assert cards_drawn == expected_draw, (
+            f"Seed {seed}: Expected to draw {expected_draw} cards, drew {cards_drawn}. "
+            f"Initial deck: {initial_deck_size}, Final deck: {final_deck_size}"
+        )
+        assert cards_removed_from_deck == expected_draw, (
+            f"Seed {seed}: Expected {expected_draw} cards removed from deck, "
+            f"but {cards_removed_from_deck} were removed"
+        )
+
+    @pytest.mark.parametrize("deck_size", [1, 2, 3, 5, 10, 20])
+    def test_flip_the_script_edge_case_deck_sizes(self, engine, deck_size):
+        """
+        Test Flip the Script with specific deck sizes to ensure edge cases work.
+        """
+        state = self.create_flip_the_script_state(
+            deck_size=deck_size,
+            hand_size=3,
+            ko_happened=True,
+            seed=12345
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        initial_hand_size = len(state.players[0].hand.cards)
+        expected_draw = min(3, deck_size)
+
+        actions = engine.get_legal_actions(state)
+        flip_actions = [a for a in actions
+                        if a.action_type == ActionType.USE_ABILITY
+                        and a.ability_name == "Flip the Script"]
+
+        assert flip_actions, f"Deck size {deck_size}: No Flip the Script action found"
+
+        state = engine.step(state, flip_actions[0])
+
+        final_hand_size = len(state.players[0].hand.cards)
+        cards_drawn = final_hand_size - initial_hand_size
+
+        assert cards_drawn == expected_draw, (
+            f"Deck size {deck_size}: Expected to draw {expected_draw}, drew {cards_drawn}"
+        )
+
+    @pytest.mark.parametrize("seed", range(30))
+    def test_flip_the_script_global_once_per_turn(self, engine, seed):
+        """
+        Only ONE Flip the Script can be used per turn, even with multiple Fezandipiti ex.
+        """
+        state = self.create_flip_the_script_state(
+            deck_size=20,
+            hand_size=3,
+            bench_fez_count=2,  # Active + 2 benched = 3 total Fezandipiti ex
+            ko_happened=True,
+            seed=seed
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        # All 3 Fezandipiti ex should show Flip the Script initially
+        actions = engine.get_legal_actions(state)
+        flip_actions = [a for a in actions
+                        if a.action_type == ActionType.USE_ABILITY
+                        and a.ability_name == "Flip the Script"]
+
+        # Should have 3 instances (one for each Fezandipiti ex)
+        assert len(flip_actions) == 3, (
+            f"Seed {seed}: Expected 3 Flip the Script actions (one per Fez), got {len(flip_actions)}"
+        )
+
+        # Use one of them
+        state = engine.step(state, flip_actions[0])
+
+        # Now NO Flip the Script should be available (global restriction)
+        actions_after = engine.get_legal_actions(state)
+        flip_actions_after = [a for a in actions_after
+                             if a.action_type == ActionType.USE_ABILITY
+                             and a.ability_name == "Flip the Script"]
+
+        assert len(flip_actions_after) == 0, (
+            f"Seed {seed}: After using one Flip the Script, no more should be available. "
+            f"Found {len(flip_actions_after)} actions"
+        )
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_flip_the_script_not_available_without_ko(self, engine, seed):
+        """
+        Flip the Script should NOT be available if no KO happened last turn.
+        """
+        state = self.create_flip_the_script_state(
+            deck_size=20,
+            hand_size=3,
+            ko_happened=False,  # No KO happened
+            seed=seed
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        actions = engine.get_legal_actions(state)
+        flip_actions = [a for a in actions
+                        if a.action_type == ActionType.USE_ABILITY
+                        and a.ability_name == "Flip the Script"]
+
+        assert len(flip_actions) == 0, (
+            f"Seed {seed}: Flip the Script should NOT be available without a KO, "
+            f"but found {len(flip_actions)} actions"
+        )
+
+    def test_flip_the_script_empty_deck(self, engine):
+        """
+        Flip the Script should NOT be available if deck is empty.
+        """
+        state = self.create_flip_the_script_state(
+            deck_size=0,  # Empty deck
+            hand_size=3,
+            ko_happened=True,
+            seed=99999
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        actions = engine.get_legal_actions(state)
+        flip_actions = [a for a in actions
+                        if a.action_type == ActionType.USE_ABILITY
+                        and a.ability_name == "Flip the Script"]
+
+        assert len(flip_actions) == 0, (
+            "Flip the Script should NOT be available with empty deck"
+        )
+
+
+# =============================================================================
+# KNOCKOUT METADATA TRACKING TESTS
+# =============================================================================
+
+class TestKnockoutMetadataTracking:
+    """
+    Test that knockout events are properly tracked in turn_metadata and
+    correctly transferred to last_turn_metadata for cross-turn effects.
+
+    Invariants tested:
+    1. KO sets knocked_out_player_ids in turn_metadata during the turn it happens
+    2. At end of turn, turn_metadata is copied to last_turn_metadata
+    3. turn_metadata is cleared after being copied
+    4. last_turn_metadata persists for exactly one opponent turn
+    5. KO tracking works for all KO variations (attack damage, bench snipe, etc.)
+    """
+
+    @pytest.fixture
+    def engine(self):
+        return PokemonEngine()
+
+    def create_ko_test_state(
+        self,
+        attacker_card_id: str = "svp-56",  # Charizard ex
+        defender_card_id: str = "sv3pt5-16",  # Pidgey (50 HP)
+        defender_hp: int = 10,  # Low HP to guarantee KO
+        defender_on_bench: bool = False,
+        seed: int = 42
+    ) -> GameState:
+        """Create a state where a KO is about to happen."""
+        random.seed(seed)
+
+        player0 = PlayerState(player_id=0, name='Attacker')
+        player1 = PlayerState(player_id=1, name='Defender')
+
+        # Attacker with energy for attack
+        attacker = create_card_instance(attacker_card_id, owner_id=0)
+        attacker.turns_in_play = 2
+        # Attach Fire energy for Burning Darkness [FF]
+        for _ in range(3):
+            attacker.attached_energy.append(create_card_instance(FIRE_ENERGY_ID, owner_id=0))
+        player0.board.active_spot = attacker
+
+        # Defender (low HP to guarantee KO)
+        defender = create_card_instance(defender_card_id, owner_id=1)
+        defender.turns_in_play = 1
+        defender.damage_counters = (get_pokemon_hp(defender_card_id) - defender_hp) // 10
+
+        if defender_on_bench:
+            # Put a different Pokemon active, defender on bench
+            active_pokemon = create_card_instance("sv4pt5-7", owner_id=1)  # Charmander
+            active_pokemon.turns_in_play = 1
+            player1.board.active_spot = active_pokemon
+            player1.board.bench.append(defender)
+        else:
+            player1.board.active_spot = defender
+
+        # Backup Pokemon for defender (needed after KO)
+        backup = create_card_instance("sv4pt5-7", owner_id=1)
+        backup.turns_in_play = 1
+        if not defender_on_bench:
+            player1.board.bench.append(backup)
+
+        # Standard deck/prizes setup
+        for _ in range(20):
+            player0.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+        for _ in range(6):
+            player0.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=3,
+            active_player_index=0,  # Attacker's turn
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+
+        return state
+
+    def test_ko_sets_metadata_during_turn(self, engine):
+        """
+        When a Pokemon is KO'd, knocked_out_player_ids should be set.
+        After resolution completes (including END_TURN), it moves to last_turn_metadata.
+        """
+        state = self.create_ko_test_state(defender_hp=10)
+        state = engine.initialize_deck_knowledge(state)
+
+        # Verify no KO metadata initially
+        assert 'knocked_out_player_ids' not in state.turn_metadata
+        assert state.last_turn_metadata == {}
+
+        # Get attack action
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if not attack_actions:
+            pytest.skip("No attack actions available")
+
+        # Execute attack (should KO the defender)
+        state = engine.step(state, attack_actions[0])
+
+        # Complete any resolution steps (like promoting new active)
+        max_steps = 20
+        for _ in range(max_steps):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # After attack resolution, KO metadata should be in either:
+        # - turn_metadata (if turn hasn't ended yet)
+        # - last_turn_metadata (if turn auto-ended after KO resolution)
+        ko_in_turn = 'knocked_out_player_ids' in state.turn_metadata and 1 in state.turn_metadata.get('knocked_out_player_ids', [])
+        ko_in_last = 'knocked_out_player_ids' in state.last_turn_metadata and 1 in state.last_turn_metadata.get('knocked_out_player_ids', [])
+
+        assert ko_in_turn or ko_in_last, (
+            f"Player 1's Pokemon was KO'd but not tracked in metadata. "
+            f"turn_metadata: {state.turn_metadata}, last_turn_metadata: {state.last_turn_metadata}"
+        )
+
+    def test_ko_metadata_transfers_to_last_turn_on_cleanup(self, engine):
+        """
+        At end of turn (CLEANUP phase), turn_metadata should transfer to last_turn_metadata.
+        """
+        state = self.create_ko_test_state(defender_hp=10)
+        state = engine.initialize_deck_knowledge(state)
+
+        # Execute attack to cause KO
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if not attack_actions:
+            pytest.skip("No attack actions available")
+
+        state = engine.step(state, attack_actions[0])
+
+        # Complete resolution steps
+        max_steps = 20
+        for _ in range(max_steps):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # Store the KO metadata before end turn
+        ko_metadata = state.turn_metadata.get('knocked_out_player_ids', []).copy()
+
+        # End the turn (should trigger CLEANUP which transfers metadata)
+        actions = engine.get_legal_actions(state)
+        end_turn_actions = [a for a in actions if a.action_type == ActionType.END_TURN]
+
+        if end_turn_actions:
+            state = engine.step(state, end_turn_actions[0])
+
+            # Complete any turn transition steps
+            for _ in range(max_steps):
+                if not state.resolution_stack:
+                    break
+                actions = engine.get_legal_actions(state)
+                if not actions:
+                    break
+                state = engine.step(state, actions[0])
+
+            # Verify metadata was transferred
+            assert 'knocked_out_player_ids' in state.last_turn_metadata, (
+                "knocked_out_player_ids should be in last_turn_metadata after turn ends"
+            )
+            assert state.last_turn_metadata['knocked_out_player_ids'] == ko_metadata, (
+                f"last_turn_metadata should contain the KO info: expected {ko_metadata}, "
+                f"got {state.last_turn_metadata.get('knocked_out_player_ids')}"
+            )
+
+            # Verify turn_metadata was cleared
+            assert 'knocked_out_player_ids' not in state.turn_metadata, (
+                "turn_metadata should be cleared after being copied to last_turn_metadata"
+            )
+
+    def test_ko_metadata_clears_after_opponent_turn(self, engine):
+        """
+        last_turn_metadata should be cleared after the opponent's turn ends,
+        so KO effects only apply for one turn.
+        """
+        state = self.create_ko_test_state(defender_hp=10)
+        state = engine.initialize_deck_knowledge(state)
+
+        # Execute attack to cause KO
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if not attack_actions:
+            pytest.skip("No attack actions available")
+
+        state = engine.step(state, attack_actions[0])
+
+        # Complete resolution and end turn
+        max_steps = 30
+        for _ in range(max_steps):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # End attacker's turn
+        actions = engine.get_legal_actions(state)
+        end_turn_actions = [a for a in actions if a.action_type == ActionType.END_TURN]
+        if end_turn_actions:
+            state = engine.step(state, end_turn_actions[0])
+
+        # Complete turn transition
+        for _ in range(max_steps):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # Now it's defender's turn - they can see the KO in last_turn_metadata
+        if state.active_player_index == 1:
+            assert 'knocked_out_player_ids' in state.last_turn_metadata, (
+                "Defender should see KO in last_turn_metadata on their turn"
+            )
+
+            # End defender's turn
+            actions = engine.get_legal_actions(state)
+            end_turn_actions = [a for a in actions if a.action_type == ActionType.END_TURN]
+            if end_turn_actions:
+                state = engine.step(state, end_turn_actions[0])
+
+                # Complete turn transition
+                for _ in range(max_steps):
+                    if not state.resolution_stack:
+                        break
+                    actions = engine.get_legal_actions(state)
+                    if not actions:
+                        break
+                    state = engine.step(state, actions[0])
+
+                # Now it's attacker's turn again - last_turn_metadata should NOT have the old KO
+                # (it should have defender's turn metadata, which had no KOs)
+                old_ko_ids = state.last_turn_metadata.get('knocked_out_player_ids', [])
+                assert 1 not in old_ko_ids, (
+                    "Old KO metadata should not persist after two turn transitions. "
+                    f"Found: {old_ko_ids}"
+                )
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_ko_from_attack_damage_sets_metadata(self, engine, seed):
+        """Test that KO from regular attack damage properly sets metadata."""
+        random.seed(seed)
+        defender_hp = random.randint(10, 50)
+
+        state = self.create_ko_test_state(defender_hp=defender_hp, seed=seed)
+        state = engine.initialize_deck_knowledge(state)
+
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if not attack_actions:
+            pytest.skip("No attack actions available")
+
+        state = engine.step(state, attack_actions[0])
+
+        # Complete resolution
+        for _ in range(30):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # Check if KO happened (defender is gone or in discard)
+        defender_in_play = (
+            state.players[1].board.active_spot and
+            state.players[1].board.active_spot.card_id == "sv3pt5-16"
+        )
+
+        if not defender_in_play:
+            # KO happened - verify metadata is tracked (in either turn or last_turn)
+            ko_in_turn = 1 in state.turn_metadata.get('knocked_out_player_ids', [])
+            ko_in_last = 1 in state.last_turn_metadata.get('knocked_out_player_ids', [])
+
+            assert ko_in_turn or ko_in_last, (
+                f"Seed {seed}: KO happened but player 1 not tracked in metadata. "
+                f"turn_metadata: {state.turn_metadata}, last_turn_metadata: {state.last_turn_metadata}"
+            )
+
+    def test_multiple_kos_same_turn_all_tracked(self, engine):
+        """
+        If multiple Pokemon are KO'd in the same turn, all should be tracked.
+        """
+        player0 = PlayerState(player_id=0, name='Attacker')
+        player1 = PlayerState(player_id=1, name='Defender')
+
+        # Powerful attacker
+        attacker = create_card_instance("svp-56", owner_id=0)
+        attacker.turns_in_play = 2
+        for _ in range(3):
+            attacker.attached_energy.append(create_card_instance(FIRE_ENERGY_ID, owner_id=0))
+        player0.board.active_spot = attacker
+
+        # Low HP active
+        defender = create_card_instance("sv3pt5-16", owner_id=1)
+        defender.turns_in_play = 1
+        defender.damage_counters = 4  # 40 damage on 50 HP = 10 HP left
+        player1.board.active_spot = defender
+
+        # Multiple bench Pokemon (in case of spread damage attacks)
+        for _ in range(3):
+            bench_mon = create_card_instance("sv3pt5-16", owner_id=1)
+            bench_mon.turns_in_play = 1
+            player1.board.bench.append(bench_mon)
+
+        # Standard setup
+        for _ in range(20):
+            player0.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+        for _ in range(6):
+            player0.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=3,
+            active_player_index=0,
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        # Execute attack
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if attack_actions:
+            state = engine.step(state, attack_actions[0])
+
+            # Complete resolution
+            for _ in range(30):
+                if not state.resolution_stack:
+                    break
+                actions = engine.get_legal_actions(state)
+                if not actions:
+                    break
+                state = engine.step(state, actions[0])
+
+            # If a KO happened, verify player 1 is tracked
+            if 'knocked_out_player_ids' in state.turn_metadata:
+                assert 1 in state.turn_metadata['knocked_out_player_ids'], (
+                    "Player 1's Pokemon was KO'd but not tracked"
+                )
+                # Player ID should only appear once even if multiple Pokemon KO'd
+                assert state.turn_metadata['knocked_out_player_ids'].count(1) == 1, (
+                    "Player ID should only appear once in knocked_out_player_ids"
+                )
+
+    def test_no_ko_means_no_metadata(self, engine):
+        """
+        If no KO happens during a turn, knocked_out_player_ids should not exist.
+        """
+        player0 = PlayerState(player_id=0, name='Player 0')
+        player1 = PlayerState(player_id=1, name='Player 1')
+
+        # Active with no energy (can't attack effectively)
+        active = create_card_instance("sv3pt5-16", owner_id=0)  # Pidgey
+        active.turns_in_play = 1
+        player0.board.active_spot = active
+
+        # High HP defender
+        defender = create_card_instance("svp-56", owner_id=1)  # Charizard ex (330 HP)
+        defender.turns_in_play = 1
+        player1.board.active_spot = defender
+
+        for _ in range(20):
+            player0.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+        for _ in range(6):
+            player0.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=3,
+            active_player_index=0,
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        # Just end turn without attacking (or attack but don't KO)
+        actions = engine.get_legal_actions(state)
+        end_turn_actions = [a for a in actions if a.action_type == ActionType.END_TURN]
+
+        if end_turn_actions:
+            state = engine.step(state, end_turn_actions[0])
+
+            # Complete turn transition
+            for _ in range(20):
+                if not state.resolution_stack:
+                    break
+                actions = engine.get_legal_actions(state)
+                if not actions:
+                    break
+                state = engine.step(state, actions[0])
+
+            # No KO should mean empty or missing knocked_out_player_ids in last_turn
+            ko_ids = state.last_turn_metadata.get('knocked_out_player_ids', [])
+            assert ko_ids == [], (
+                f"No KO happened but knocked_out_player_ids is {ko_ids}"
+            )
+
+    def test_own_pokemon_ko_tracked_correctly(self, engine):
+        """
+        When YOUR Pokemon is KO'd (not opponent's), your player_id should be in the list.
+        This is important for Fezandipiti ex which checks if YOUR Pokemon was KO'd.
+        """
+        # Set up so player 1 attacks and KOs player 0's Pokemon
+        player0 = PlayerState(player_id=0, name='Defender')
+        player1 = PlayerState(player_id=1, name='Attacker')
+
+        # Player 0 has low HP Pokemon
+        defender = create_card_instance("sv3pt5-16", owner_id=0)
+        defender.turns_in_play = 1
+        defender.damage_counters = 4  # 10 HP left
+        player0.board.active_spot = defender
+
+        # Backup for player 0
+        backup = create_card_instance("sv4pt5-7", owner_id=0)
+        backup.turns_in_play = 1
+        player0.board.bench.append(backup)
+
+        # Player 1 has strong attacker
+        attacker = create_card_instance("svp-56", owner_id=1)
+        attacker.turns_in_play = 2
+        for _ in range(3):
+            attacker.attached_energy.append(create_card_instance(FIRE_ENERGY_ID, owner_id=1))
+        player1.board.active_spot = attacker
+
+        for _ in range(20):
+            player0.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.deck.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+        for _ in range(6):
+            player0.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=0))
+            player1.prizes.add_card(create_card_instance(random.choice(BASIC_POKEMON), owner_id=1))
+
+        state = GameState(
+            players=[player0, player1],
+            turn_count=3,
+            active_player_index=1,  # Player 1's turn (attacker)
+            current_phase=GamePhase.MAIN,
+            starting_player_id=0
+        )
+        state = engine.initialize_deck_knowledge(state)
+
+        # Player 1 attacks
+        actions = engine.get_legal_actions(state)
+        attack_actions = [a for a in actions if a.action_type == ActionType.ATTACK]
+
+        if not attack_actions:
+            pytest.skip("No attack actions available")
+
+        state = engine.step(state, attack_actions[0])
+
+        # Complete resolution
+        for _ in range(30):
+            if not state.resolution_stack:
+                break
+            actions = engine.get_legal_actions(state)
+            if not actions:
+                break
+            state = engine.step(state, actions[0])
+
+        # Player 0's Pokemon was KO'd - their ID should be tracked
+        # Could be in turn_metadata or last_turn_metadata depending on auto-end-turn
+        ko_in_turn = 0 in state.turn_metadata.get('knocked_out_player_ids', [])
+        ko_in_last = 0 in state.last_turn_metadata.get('knocked_out_player_ids', [])
+
+        assert ko_in_turn or ko_in_last, (
+            "Player 0's Pokemon was KO'd but player_id 0 not tracked in metadata. "
+            f"turn_metadata: {state.turn_metadata}, last_turn_metadata: {state.last_turn_metadata}"
+        )
+
+
+def get_pokemon_hp(card_id: str) -> int:
+    """Helper to get a Pokemon's HP from its card definition."""
+    card_def = create_card(card_id)
+    if card_def and hasattr(card_def, 'hp'):
+        return card_def.hp
+    return 50  # Default fallback
+
+
+# =============================================================================
 # RUN CONFIGURATION
 # =============================================================================
 

@@ -85,17 +85,17 @@ def hoothoot_silent_wing_effect(state: GameState, card: CardInstance, action: Ac
 SV5_LOGIC = {
     # Buddy-Buddy Poffin (Trainer)
     "sv5-144": {
-        "actions": {
-            "play": {
-                "generator": buddy_buddy_poffin_actions,
-                "effect": buddy_buddy_poffin_effect,
-            }
-        }
+        "Play Buddy-Buddy Poffin": {
+            "category": "activatable",
+            "generator": buddy_buddy_poffin_actions,
+            "effect": buddy_buddy_poffin_effect,
+        },
     },
 
     # Hoothoot - Version 1 (Silent Wing)
     "sv5-126": {
         "Silent Wing": {
+            "category": "attack",
             "generator": hoothoot_silent_wing_actions,
             "effect": hoothoot_silent_wing_effect,
         },

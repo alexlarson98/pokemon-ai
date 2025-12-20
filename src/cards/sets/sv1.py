@@ -10,21 +10,23 @@ from cards.library.trainers import (
     ultra_ball_actions,
 )
 
+# ============================================================================
+# SV1 LOGIC REGISTRY (Unified Schema)
+# ============================================================================
+
 SV1_LOGIC = {
     "sv1-181": {  # Nest Ball
-        "actions": {
-            "play": {
-                "generator": nest_ball_actions,
-                "effect": nest_ball_effect,
-            }
-        }
+        "Play Nest Ball": {
+            "category": "activatable",
+            "generator": nest_ball_actions,
+            "effect": nest_ball_effect,
+        },
     },
     "sv1-196": {  # Ultra Ball
-        "actions": {
-            "play": {
-                "generator": ultra_ball_actions,
-                "effect": ultra_ball_effect,
-            }
-        }
+        "Play Ultra Ball": {
+            "category": "activatable",
+            "generator": ultra_ball_actions,
+            "effect": ultra_ball_effect,
+        },
     },
 }

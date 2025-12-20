@@ -935,30 +935,106 @@ class DataDrivenPokemon(PokemonCard):
         """
         Get abilities as simple objects for engine compatibility.
 
-        Returns a list of ability objects with name and text attributes.
+        Returns a list of ability objects with name, text, type, category, and is_activatable.
+
+        The 'category' field uses the unified schema categories:
+        - 'activatable': Player-triggered ability (generates actions)
+        - 'modifier': Continuously modifies values (retreat cost, damage, HP)
+        - 'guard': Blocks effects/conditions (status, damage)
+        - 'hook': Event-triggered (on_play, on_knockout)
+
+        The 'is_activatable' field is kept for backwards compatibility.
         """
         from collections import namedtuple
-        Ability = namedtuple('Ability', ['name', 'text', 'type'])
+
+        Ability = namedtuple('Ability', ['name', 'text', 'type', 'category', 'is_activatable'])
 
         abilities = []
         for ability_data in self.json_data.get('abilities', []):
+            name = ability_data.get('name', '')
+            text = ability_data.get('text', '')
+
+            # Check registry for explicit category (unified schema)
+            from cards import logic_registry
+            ability_info = logic_registry.get_ability_info(self.card_id, name)
+
+            if ability_info and 'category' in ability_info:
+                category = ability_info['category']
+            else:
+                # Infer category from text
+                category = self._infer_ability_category(text)
+
+            # is_activatable for backwards compatibility
+            is_activatable = category in ('activatable', 'attack')
+
             abilities.append(Ability(
-                name=ability_data.get('name', ''),
-                text=ability_data.get('text', ''),
-                type=ability_data.get('type', 'Ability')
+                name=name,
+                text=text,
+                type=ability_data.get('type', 'Ability'),
+                category=category,
+                is_activatable=is_activatable
             ))
 
         return abilities
 
+    def _infer_ability_category(self, text: str) -> str:
+        """
+        Infer ability category from text (fallback when not in registry).
+
+        Returns one of: 'activatable', 'modifier', 'guard', 'hook', 'unknown'
+        """
+        text_lower = text.lower()
+
+        # Check for hooks first (triggered events)
+        hook_patterns = [
+            'when you play this pokemon',
+            'when this pokemon is knocked out',
+            'when you attach',
+            'put this card into'
+        ]
+        if any(p in text_lower for p in hook_patterns):
+            return 'hook'
+
+        # Check for activatable abilities
+        activatable_patterns = [
+            'once during your turn',
+            'you may use',
+            'as often as you like during your turn',
+            'once per turn'
+        ]
+        if any(p in text_lower for p in activatable_patterns):
+            return 'activatable'
+
+        # Check for modifiers
+        modifier_patterns = [
+            'retreat cost', 'less damage', 'more damage',
+            'maximum hp', 'get +', 'takes', 'has no retreat',
+            'hp is', 'attacks do'
+        ]
+        if any(p in text_lower for p in modifier_patterns):
+            return 'modifier'
+
+        # Check for guards
+        guard_patterns = [
+            'prevent all', "can't be affected", "can't be asleep",
+            "can't be paralyzed", "can't be confused", "can't be burned",
+            "can't be poisoned"
+        ]
+        if any(p in text_lower for p in guard_patterns):
+            return 'guard'
+
+        return 'unknown'
+
     def get_attacks(self, state: 'GameState', card_instance: 'CardInstance') -> List[Dict]:
         """
-        Get attacks from JSON, with logic from registry.
+        Get attacks from JSON.
+
+        Note: Attack logic (generator/effect) is looked up from MASTER_LOGIC_REGISTRY
+        by card_id in the engine, not stored here.
 
         Returns:
             List of attack dictionaries
         """
-        from cards.logic_registry import LOGIC_MAP
-
         attacks = []
 
         for attack_data in self.json_data.get('attacks', []):
@@ -976,53 +1052,41 @@ class DataDrivenPokemon(PokemonCard):
             # Get damage (could be "70×", "60+", or just "60")
             damage_str = attack_data.get('damage', '0')
             if '×' in damage_str or '+' in damage_str:
-                # Variable damage - look up logic in registry
-                if attack_name in LOGIC_MAP:
-                    damage = LOGIC_MAP[attack_name](state, card_instance, 'calculate')
-                else:
-                    damage = 0  # Unknown variable damage
+                # Variable damage - actual calculation done by attack effect function
+                damage = 0
             else:
                 # Fixed damage
                 damage = int(damage_str) if damage_str and damage_str != '' else 0
-
-            # Look up effect logic
-            effect_func = LOGIC_MAP.get(attack_name)
-            effects = [effect_func] if effect_func else []
 
             attacks.append({
                 'name': attack_name,
                 'cost': cost,
                 'damage': damage,
                 'text': attack_data.get('text', ''),
-                'effects': effects
             })
 
         return attacks
 
     def get_abilities(self, state: 'GameState', card_instance: 'CardInstance') -> List[Dict]:
         """
-        Get abilities from JSON, with logic from registry.
+        Get abilities from JSON.
+
+        Note: Ability logic is looked up from MASTER_LOGIC_REGISTRY by card_id
+        in the engine, not stored here.
 
         Returns:
             List of ability dictionaries
         """
-        from cards.logic_registry import LOGIC_MAP
-
         abilities = []
 
         for ability_data in self.json_data.get('abilities', []):
             ability_name = ability_data['name']
 
-            # Look up logic in registry
-            effect_func = LOGIC_MAP.get(ability_name)
-
-            if effect_func:
-                abilities.append({
-                    'name': ability_name,
-                    'type': ability_data.get('type', 'activated'),
-                    'text': ability_data.get('text', ''),
-                    'effect': effect_func
-                })
+            abilities.append({
+                'name': ability_name,
+                'type': ability_data.get('type', 'Ability'),
+                'text': ability_data.get('text', ''),
+            })
 
         return abilities
 
@@ -1089,22 +1153,25 @@ class DataDrivenTrainer(TrainerCard):
         targets: Optional[Dict] = None
     ) -> 'GameState':
         """
-        Execute Trainer effect by looking up logic in registry.
+        Execute Trainer effect.
+
+        Note: Trainer logic is handled by the engine using MASTER_LOGIC_REGISTRY.
+        This method is a fallback that should not be called for registered cards.
 
         Raises:
-            NotImplementedError: If card logic not found in registry
+            NotImplementedError: If called directly (engine should handle this)
         """
-        from cards.logic_registry import LOGIC_MAP
+        from cards.logic_registry import get_card_logic
 
-        # Look up logic by card name
-        logic_func = LOGIC_MAP.get(self.name)
+        # Look up effect by card_id in unified schema
+        effect_func = get_card_logic(self.id, 'effect')
 
-        if logic_func:
-            return logic_func(state, card_instance, targets)
+        if effect_func:
+            return effect_func(state, card_instance, targets)
         else:
             raise NotImplementedError(
-                f"Logic for '{self.name}' not found in logic_registry. "
-                f"Add implementation to LOGIC_MAP."
+                f"Logic for '{self.name}' ({self.id}) not found in MASTER_LOGIC_REGISTRY. "
+                f"Add implementation to the appropriate set file."
             )
 
 
@@ -1199,13 +1266,13 @@ class DataDrivenEnergy(EnergyCard):
         Returns:
             Modified GameState
         """
-        from cards.logic_registry import LOGIC_MAP
+        from cards.logic_registry import get_card_hooks
 
-        # Look up on-attach logic by card name
-        attach_func = LOGIC_MAP.get(self.name)
+        # Look up on-attach hook by card_id in unified schema
+        attach_func = get_card_hooks(self.id, 'on_attach')
 
         if attach_func:
-            return attach_func(state, target_pokemon_id)
+            return attach_func(state, self, {'target_pokemon_id': target_pokemon_id})
 
         # No special effect - return state unchanged
         return state

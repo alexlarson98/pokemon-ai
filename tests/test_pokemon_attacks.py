@@ -294,8 +294,10 @@ class TestHoothootRegistration:
         assert "sv8pt5-77" in MASTER_LOGIC_REGISTRY
         data = MASTER_LOGIC_REGISTRY["sv8pt5-77"]
         assert "Tackle" in data
-        assert "guards" in data
-        assert "status_condition" in data["guards"]
+        # Check for Insomnia guard using unified schema
+        assert "Insomnia" in data
+        assert data["Insomnia"]["category"] == "guard"
+        assert data["Insomnia"]["guard_type"] == "status_condition"
 
 
 class TestHoothootSilentWing:
@@ -455,8 +457,10 @@ class TestCharmeleonRegistration:
         assert "sv4pt5-8" in MASTER_LOGIC_REGISTRY
         data = MASTER_LOGIC_REGISTRY["sv4pt5-8"]
         assert "Combustion" in data
-        assert "guards" in data
-        assert "effect_prevention" in data["guards"]
+        # Check for Flare Veil guard using unified schema
+        assert "Flare Veil" in data
+        assert data["Flare Veil"]["category"] == "guard"
+        assert data["Flare Veil"]["guard_type"] == "effect_prevention"
 
     def test_charmeleon_me2_12_steady_firebreathing(self):
         """Charmeleon me2-12 should have Steady Firebreathing attack."""

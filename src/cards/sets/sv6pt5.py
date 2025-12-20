@@ -392,30 +392,36 @@ SV6PT5_LOGIC = {
     # Fezandipiti ex - Flip the Script & Cruel Arrow
     "sv6pt5-38": {
         "Flip the Script": {
+            "category": "activatable",
             "generator": fezandipiti_ex_flip_the_script_actions,
             "effect": fezandipiti_ex_flip_the_script_effect,
         },
         "Cruel Arrow": {
+            "category": "attack",
             "generator": fezandipiti_ex_cruel_arrow_actions,
             "effect": fezandipiti_ex_cruel_arrow_effect,
         },
     },
     "sv6pt5-84": {
         "Flip the Script": {
+            "category": "activatable",
             "generator": fezandipiti_ex_flip_the_script_actions,
             "effect": fezandipiti_ex_flip_the_script_effect,
         },
         "Cruel Arrow": {
+            "category": "attack",
             "generator": fezandipiti_ex_cruel_arrow_actions,
             "effect": fezandipiti_ex_cruel_arrow_effect,
         },
     },
     "sv6pt5-92": {
         "Flip the Script": {
+            "category": "activatable",
             "generator": fezandipiti_ex_flip_the_script_actions,
             "effect": fezandipiti_ex_flip_the_script_effect,
         },
         "Cruel Arrow": {
+            "category": "attack",
             "generator": fezandipiti_ex_cruel_arrow_actions,
             "effect": fezandipiti_ex_cruel_arrow_effect,
         },
@@ -423,20 +429,24 @@ SV6PT5_LOGIC = {
     # Duskull - Come and Get You & Mumble
     "sv6pt5-18": {
         "Come and Get You": {
+            "category": "attack",
             "generator": duskull_come_and_get_you_actions,
             "effect": duskull_come_and_get_you_effect,
         },
         "Mumble": {
+            "category": "attack",
             "generator": duskull_mumble_actions,
             "effect": duskull_mumble_effect,
         },
     },
     "sv6pt5-68": {
         "Come and Get You": {
+            "category": "attack",
             "generator": duskull_come_and_get_you_actions,
             "effect": duskull_come_and_get_you_effect,
         },
         "Mumble": {
+            "category": "attack",
             "generator": duskull_mumble_actions,
             "effect": duskull_mumble_effect,
         },

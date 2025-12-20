@@ -429,20 +429,24 @@ SV3PT5_LOGIC = {
     # Charmander - Version 3 (both printings have same attacks)
     "sv3pt5-4": {
         "Blazing Destruction": {
+            "category": "attack",
             "generator": charmander_blazing_destruction_actions,
             "effect": charmander_blazing_destruction_effect,
         },
         "Steady Firebreathing": {
+            "category": "attack",
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
         },
     },
     "sv3pt5-168": {
         "Blazing Destruction": {
+            "category": "attack",
             "generator": charmander_blazing_destruction_actions,
             "effect": charmander_blazing_destruction_effect,
         },
         "Steady Firebreathing": {
+            "category": "attack",
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
         },
@@ -451,20 +455,24 @@ SV3PT5_LOGIC = {
     # Charmeleon - Version 2 (Combustion + Fire Blast)
     "sv3pt5-5": {
         "Combustion": {
+            "category": "attack",
             "generator": charmeleon_combustion_actions,
             "effect": charmeleon_combustion_effect,
         },
         "Fire Blast": {
+            "category": "attack",
             "generator": charmeleon_fire_blast_actions,
             "effect": charmeleon_fire_blast_effect,
         },
     },
     "sv3pt5-169": {
         "Combustion": {
+            "category": "attack",
             "generator": charmeleon_combustion_actions,
             "effect": charmeleon_combustion_effect,
         },
         "Fire Blast": {
+            "category": "attack",
             "generator": charmeleon_fire_blast_actions,
             "effect": charmeleon_fire_blast_effect,
         },
@@ -473,10 +481,12 @@ SV3PT5_LOGIC = {
     # Pidgey - Version 2 (Call for Family + Tackle)
     "sv3pt5-16": {
         "Call for Family": {
+            "category": "attack",
             "generator": pidgey_call_for_family_actions,
             "effect": pidgey_call_for_family_effect,
         },
         "Tackle": {
+            "category": "attack",
             "generator": pidgey_tackle_actions,
             "effect": pidgey_tackle_effect,
         },
@@ -485,30 +495,36 @@ SV3PT5_LOGIC = {
     # Charizard ex - Version 3 (Brave Wing + Explosive Vortex)
     "sv3pt5-6": {
         "Brave Wing": {
+            "category": "attack",
             "generator": charizard_ex_brave_wing_actions,
             "effect": charizard_ex_brave_wing_effect,
         },
         "Explosive Vortex": {
+            "category": "attack",
             "generator": charizard_ex_explosive_vortex_actions,
             "effect": charizard_ex_explosive_vortex_effect,
         },
     },
     "sv3pt5-183": {
         "Brave Wing": {
+            "category": "attack",
             "generator": charizard_ex_brave_wing_actions,
             "effect": charizard_ex_brave_wing_effect,
         },
         "Explosive Vortex": {
+            "category": "attack",
             "generator": charizard_ex_explosive_vortex_actions,
             "effect": charizard_ex_explosive_vortex_effect,
         },
     },
     "sv3pt5-199": {
         "Brave Wing": {
+            "category": "attack",
             "generator": charizard_ex_brave_wing_actions,
             "effect": charizard_ex_brave_wing_effect,
         },
         "Explosive Vortex": {
+            "category": "attack",
             "generator": charizard_ex_explosive_vortex_actions,
             "effect": charizard_ex_explosive_vortex_effect,
         },

@@ -174,18 +174,23 @@ ME2_LOGIC = {
     "me2-11": {
         # Attack: Live Coal [F] - 20 damage
         "Live Coal": {
+            "category": "attack",
             "generator": charmander_live_coal_actions,
             "effect": charmander_live_coal_effect,
         },
         # Ability: Agile (MODIFIER) - If no Energy attached, retreat cost = 0
-        "modifiers": {
-            "retreat_cost": charmander_agile_modifier,
+        "Agile": {
+            "category": "modifier",
+            "modifier_type": "retreat_cost",
+            "scope": "self",
+            "effect": charmander_agile_modifier,
         },
     },
 
     # Charmeleon - Version 4 (Steady Firebreathing)
     "me2-12": {
         "Steady Firebreathing": {
+            "category": "attack",
             "generator": charmeleon_steady_firebreathing_actions,
             "effect": charmeleon_steady_firebreathing_effect,
         },

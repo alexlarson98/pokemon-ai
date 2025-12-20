@@ -106,17 +106,19 @@ def hoothoot_insomnia_guard(state: GameState, card: CardInstance, condition: Sta
 
 
 # ============================================================================
-# SV8PT5 LOGIC REGISTRY
+# SV8PT5 LOGIC REGISTRY (Unified Schema)
 # ============================================================================
 
 SV8PT5_LOGIC = {
     # Duskull - Reprint from sv6pt5
     "sv8pt5-35": {
         "Come and Get You": {
+            "category": "attack",
             "generator": duskull_come_and_get_you_actions,
             "effect": duskull_come_and_get_you_effect,
         },
         "Mumble": {
+            "category": "attack",
             "generator": duskull_mumble_actions,
             "effect": duskull_mumble_effect,
         },
@@ -125,11 +127,15 @@ SV8PT5_LOGIC = {
     # Hoothoot - Version 3 (Tackle + Insomnia guard)
     "sv8pt5-77": {
         "Tackle": {
+            "category": "attack",
             "generator": hoothoot_tackle_actions,
             "effect": hoothoot_tackle_effect,
         },
-        "guards": {
-            "status_condition": hoothoot_insomnia_guard,
+        "Insomnia": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": hoothoot_insomnia_guard,
         },
     },
 }

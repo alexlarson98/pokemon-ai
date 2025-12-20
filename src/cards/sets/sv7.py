@@ -88,6 +88,7 @@ SV7_LOGIC = {
     # Hoothoot - Version 2 (Triple Stab)
     "sv7-114": {
         "Triple Stab": {
+            "category": "attack",
             "generator": hoothoot_triple_stab_actions,
             "effect": hoothoot_triple_stab_effect,
         },

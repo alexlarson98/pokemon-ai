@@ -1,0 +1,6 @@
+Pokémon: 3
+2 Charmander PAF 7
+1 Charmander PFL 11
+
+Energy: 57
+57 Fire Energy MEE 2

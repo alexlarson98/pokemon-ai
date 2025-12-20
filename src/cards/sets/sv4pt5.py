@@ -149,20 +149,24 @@ SV4PT5_LOGIC = {
     # Charmander - Version 3 reprints (from sv3pt5)
     "sv4pt5-7": {
         "Blazing Destruction": {
+            "category": "attack",
             "generator": charmander_blazing_destruction_actions,
             "effect": charmander_blazing_destruction_effect,
         },
         "Steady Firebreathing": {
+            "category": "attack",
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
         },
     },
     "sv4pt5-109": {
         "Blazing Destruction": {
+            "category": "attack",
             "generator": charmander_blazing_destruction_actions,
             "effect": charmander_blazing_destruction_effect,
         },
         "Steady Firebreathing": {
+            "category": "attack",
             "generator": charmander_steady_firebreathing_actions,
             "effect": charmander_steady_firebreathing_effect,
         },
@@ -171,71 +175,78 @@ SV4PT5_LOGIC = {
     # Charmeleon - Version 3 (Combustion 50 + Flare Veil guard)
     "sv4pt5-8": {
         "Combustion": {
+            "category": "attack",
             "generator": charmeleon_v3_combustion_actions,
             "effect": charmeleon_v3_combustion_effect,
         },
-        "guards": {
-            "effect_prevention": charmeleon_flare_veil_guard,
+        "Flare Veil": {
+            "category": "guard",
+            "guard_type": "effect_prevention",
+            "scope": "self",
+            "effect": charmeleon_flare_veil_guard,
         },
     },
     "sv4pt5-110": {
         "Combustion": {
+            "category": "attack",
             "generator": charmeleon_v3_combustion_actions,
             "effect": charmeleon_v3_combustion_effect,
         },
-        "guards": {
-            "effect_prevention": charmeleon_flare_veil_guard,
+        "Flare Veil": {
+            "category": "guard",
+            "guard_type": "effect_prevention",
+            "scope": "self",
+            "effect": charmeleon_flare_veil_guard,
         },
     },
 
     # Chien-Pao ex (reprint from sv2)
     "sv4pt5-242": {
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
 
     "sv4pt5-80": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
     "sv4pt5-237": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
     "sv4pt5-89": {  # Rare Candy
-        "actions": {
-            "play": {
-                "generator": rare_candy_actions,
-                "effect": rare_candy_effect,
-            }
-        }
+        "Play Rare Candy": {
+            "category": "activatable",
+            "generator": rare_candy_actions,
+            "effect": rare_candy_effect,
+        },
     },
     "sv4pt5-91": {  # Ultra Ball
-        "actions": {
-            "play": {
-                "generator": ultra_ball_actions,
-                "effect": ultra_ball_effect,
-            }
-        }
+        "Play Ultra Ball": {
+            "category": "activatable",
+            "generator": ultra_ball_actions,
+            "effect": ultra_ball_effect,
+        },
     },
 
     # Pidgey - Version 2 reprint (from sv3pt5)
     "sv4pt5-196": {
         "Call for Family": {
+            "category": "attack",
             "generator": pidgey_call_for_family_actions,
             "effect": pidgey_call_for_family_effect,
         },
         "Tackle": {
+            "category": "attack",
             "generator": pidgey_tackle_actions,
             "effect": pidgey_tackle_effect,
         },
@@ -244,20 +255,26 @@ SV4PT5_LOGIC = {
     # Charizard ex - Version 1/2 reprints (Infernal Reign + Burning Darkness)
     "sv4pt5-54": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
     "sv4pt5-234": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
 }

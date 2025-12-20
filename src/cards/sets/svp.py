@@ -504,6 +504,7 @@ SVP_LOGIC = {
     # Charmander - Version 1: Heat Tackle
     "svp-44": {
         "Heat Tackle": {
+            "category": "attack",
             "generator": charmander_heat_tackle_actions,
             "effect": charmander_heat_tackle_effect,
         },
@@ -512,6 +513,7 @@ SVP_LOGIC = {
     # Charmander - Version 2: Ember
     "svp-47": {
         "Ember": {
+            "category": "attack",
             "generator": charmander_ember_actions,
             "effect": charmander_ember_effect,
         },
@@ -520,6 +522,7 @@ SVP_LOGIC = {
     # Chien-Pao ex (promo reprint from sv2)
     "svp-30": {
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
@@ -528,30 +531,38 @@ SVP_LOGIC = {
     # Charizard ex - Version 1/2 (Infernal Reign + Burning Darkness)
     "svp-56": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
     "svp-74": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
 
     # Charizard ex - Version 3 (Brave Wing + Explosive Vortex)
     "svp-161": {
         "Brave Wing": {
+            "category": "attack",
             "generator": charizard_ex_brave_wing_actions,
             "effect": charizard_ex_brave_wing_effect,
         },
         "Explosive Vortex": {
+            "category": "attack",
             "generator": charizard_ex_explosive_vortex_actions,
             "effect": charizard_ex_explosive_vortex_effect,
         },
@@ -560,11 +571,10 @@ SVP_LOGIC = {
     # TRAINERS
 
     "svp-124": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
 }

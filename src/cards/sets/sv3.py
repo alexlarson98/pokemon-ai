@@ -161,13 +161,14 @@ def pidgey_gust_effect(state: GameState, card: CardInstance, action: Action) -> 
 
 
 # ============================================================================
-# SV3 LOGIC REGISTRY
+# SV3 LOGIC REGISTRY (Unified Schema)
 # ============================================================================
 
 SV3_LOGIC = {
     # Charmander - Version 1 reprint (Heat Tackle from svp)
     "sv3-26": {
         "Heat Tackle": {
+            "category": "attack",
             "generator": charmander_heat_tackle_actions,
             "effect": charmander_heat_tackle_effect,
         },
@@ -176,6 +177,7 @@ SV3_LOGIC = {
     # Charmeleon - Version 1 (Heat Tackle)
     "sv3-27": {
         "Heat Tackle": {
+            "category": "attack",
             "generator": charmeleon_heat_tackle_actions,
             "effect": charmeleon_heat_tackle_effect,
         },
@@ -184,12 +186,14 @@ SV3_LOGIC = {
     # Pidgey - Version 1 (Gust)
     "sv3-162": {
         "Gust": {
+            "category": "attack",
             "generator": pidgey_gust_actions,
             "effect": pidgey_gust_effect,
         },
     },
     "sv3-207": {
         "Gust": {
+            "category": "attack",
             "generator": pidgey_gust_actions,
             "effect": pidgey_gust_effect,
         },
@@ -198,38 +202,50 @@ SV3_LOGIC = {
     # Charizard ex - Version 4 (Infernal Reign + Burning Darkness)
     "sv3-125": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
     "sv3-215": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
     "sv3-223": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
     "sv3-228": {
         "Burning Darkness": {
+            "category": "attack",
             "generator": charizard_ex_burning_darkness_actions,
             "effect": charizard_ex_burning_darkness_effect,
         },
-        "hooks": {
-            "on_evolve": charizard_ex_infernal_reign_hook,
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": charizard_ex_infernal_reign_hook,
         },
     },
 }

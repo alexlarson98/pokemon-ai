@@ -4,87 +4,69 @@ Pokémon TCG Engine - Card Logic Registry (Pure Router)
 This module serves as a pure routing layer for card-specific logic.
 All implementation functions are stored in set-based modules under cards/sets/.
 
-Architecture - The 4 Pillars of Card Logic:
-================================
-Each card entry in the registry uses attack/ability names as direct keys,
-plus optional pillar keys for modifiers, guards, and hooks:
+================================================================================
+UNIFIED ABILITY SCHEMA
+================================================================================
 
-1. Attack/Ability Actions (direct keys using attack name):
-   - Called to generate legal actions for MCTS
-   - Format: {"Attack Name": {"generator": fn, "effect": fn}}
-   - Example: {"Heat Tackle": {"generator": heat_tackle_actions, "effect": heat_tackle_effect}}
+Every attack and ability is registered under its EXACT NAME with a 'category' field:
 
-2. "modifiers": Dictionary of value-modifying functions
-   - LOCAL modifiers: Affect only the card itself (e.g., Charmander's Agile)
-   - GLOBAL modifiers: Affect other cards on the board (e.g., Beach Court Stadium)
-   - Local: {"modifiers": {"retreat_cost": fn}}  # fn(state, card, current_cost) -> new_value
-   - Global: {"modifiers": {"global_retreat_cost": fn}}  # fn(state, source, target, cost) -> new_cost
+Categories:
+- "attack": Deals damage, has energy cost, generates actions
+- "activatable": Player-triggered ability, generates actions
+- "modifier": Continuously modifies values (retreat cost, damage, HP)
+- "guard": Blocks effects/conditions (status, damage, trainer cards)
+- "hook": Event-triggered (on_play, on_knockout, etc.)
 
-3. "guards": Dictionary of permission-blocking functions
-   - LOCAL guards: Block effects on the card itself (e.g., Hoothoot's Insomnia)
-   - GLOBAL guards: Block effects on other cards (e.g., Item Lock, Ability Lock)
-   - Local: {"guards": {"status_condition": fn}}  # fn(state, card, condition) -> bool (blocked)
-   - Global: {"guards": {"global_play_item": fn}}  # fn(state, source, context) -> bool (blocked)
-
-4. "hooks": Dictionary of event-triggered functions
-   - Called when specific game events occur (on_play_pokemon, on_knockout, etc.)
-   - Example: {"hooks": {"on_play_pokemon": fn}}  # fn(state, card, context) -> GameState
-
-Registry Entry Examples:
-========================
-# Pokemon with attack only:
-"sv3-162": {
-    "Gust": {"generator": pidgey_gust_actions, "effect": pidgey_gust_effect},
-}
-
-# Pokemon with multiple attacks:
-"sv3pt5-16": {
-    "Call for Family": {"generator": call_for_family_actions, "effect": call_for_family_effect},
-    "Tackle": {"generator": tackle_actions, "effect": tackle_effect},
-}
-
-# Pokemon with attack + modifier (passive ability):
-"me2-11": {
-    "Live Coal": {"generator": live_coal_actions, "effect": live_coal_effect},
-    "modifiers": {"retreat_cost": charmander_agile_modifier},
-}
-
-# Trainer card (uses actions wrapper with "play" action):
-"me1-125": {
-    "actions": {
-        "play": {
-            "generator": rare_candy_actions,
-            "effect": rare_candy_effect,
-        }
+Example:
+    "sv8pt5-77": {
+        "Tackle": {
+            "category": "attack",
+            "generator": hoothoot_tackle_actions,
+            "effect": hoothoot_tackle_effect,
+        },
+        "Insomnia": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": hoothoot_insomnia_guard,
+        },
     }
-}
 
-Local vs Global Effects:
-========================
-- LOCAL: No prefix - affects only the card with the effect
-  - get_card_modifier(), get_card_guard() - for checking a specific card
-- GLOBAL: Prefixed with "global_" - affects other cards on the board
-  - scan_global_modifiers(), scan_global_guards() - scans entire board
+Multi-Effect Abilities:
+When an ability has multiple effects, use suffixed entries:
+    "me2-41": {
+        "Diamond Coat (Damage Reduction)": {
+            "category": "modifier",
+            "modifier_type": "damage_taken",
+            "scope": "self",
+            "effect": damage_modifier_fn,
+        },
+        "Diamond Coat (Status Immunity)": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": status_guard_fn,
+        },
+    }
 
-Usage:
-    from cards.logic_registry import (
-        get_card_logic,
-        get_card_modifier, get_card_guard, get_card_hooks,
-        scan_global_modifiers, scan_global_guards
-    )
+================================================================================
+QUERY FUNCTIONS
+================================================================================
 
-    # Get attack logic for a Pokemon
-    attack_logic = get_card_logic("sv3-162", "Gust")
-    # Returns: {"generator": fn, "effect": fn}
+Primary:
+    get_ability_info(card_id, ability_name) -> dict with category and all fields
+    get_all_effects_for_ability(card_id, ability_name) -> list for multi-effect
 
-    # Check if a card modifies its own retreat cost (LOCAL)
-    retreat_modifier = get_card_modifier("me2-11", "retreat_cost")
+Helpers:
+    get_card_logic(card_id, logic_type) -> generator/effect function
+    get_card_modifier(card_id, modifier_type) -> modifier function
+    get_card_guard(card_id, guard_type) -> guard function
+    get_card_hooks(card_id, hook_type) -> hook function
 
-    # Scan board for cards that modify OTHER cards' retreat cost (GLOBAL)
-    global_modifiers = scan_global_modifiers(state, "global_retreat_cost")
-
-    # Check if playing an item is blocked by any card on the board (GLOBAL GUARD)
-    blockers = scan_global_guards(state, "global_play_item", {"item": item, "player": player})
+Board Scanning:
+    scan_global_modifiers(state, modifier_type) -> list of (card, fn) tuples
+    scan_global_guards(state, guard_type, context) -> list of (card, fn, blocking) tuples
+    check_global_block(state, guard_type, context) -> bool
 """
 
 from typing import Optional, Callable, Dict, List, Any
@@ -139,17 +121,159 @@ for set_logic in [
 
 
 # ============================================================================
-# ROUTER FUNCTION
+# UNIFIED SCHEMA QUERY FUNCTIONS (New - Recommended)
+# ============================================================================
+
+def get_ability_info(card_id: str, ability_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Get complete ability/attack information including category.
+
+    This is the primary function for the unified schema. It returns the full
+    dict entry for an ability, including 'category' and all relevant fields.
+
+    Handles suffixed entries for multi-effect abilities:
+    - First tries exact match: "Diamond Coat"
+    - Then tries suffixed: "Diamond Coat (Modifier)", "Diamond Coat (Guard)"
+
+    Args:
+        card_id: The card's ID (e.g., "sv8pt5-77")
+        ability_name: The ability/attack name (e.g., "Insomnia", "Tackle")
+
+    Returns:
+        Dict with 'category' and all relevant fields, or None if not found.
+
+    Example:
+        >>> info = get_ability_info("sv8pt5-77", "Insomnia")
+        >>> if info and info.get('category') == 'guard':
+        >>>     guard_fn = info['effect']
+        >>>     blocked = guard_fn(state, card, condition)
+    """
+    card_data = MASTER_LOGIC_REGISTRY.get(card_id)
+    if not isinstance(card_data, dict):
+        return None
+
+    # Exact match first
+    if ability_name in card_data:
+        entry = card_data[ability_name]
+        if isinstance(entry, dict):
+            # New schema: has 'category' field
+            if 'category' in entry:
+                return entry
+            # Legacy schema: has 'generator'/'effect' but no category
+            # Infer category as 'attack' or 'activatable'
+            if 'generator' in entry or 'effect' in entry:
+                # Return with inferred category for backwards compat
+                return {**entry, 'category': 'attack'}  # or 'activatable'
+
+    # Try common suffixes for multi-effect abilities
+    suffixes = [
+        '(Modifier)', '(Guard)', '(Hook)',
+        '(Damage Reduction)', '(Status Immunity)', '(Damage Modifier)',
+    ]
+    for suffix in suffixes:
+        key = f"{ability_name} {suffix}"
+        if key in card_data:
+            entry = card_data[key]
+            if isinstance(entry, dict) and 'category' in entry:
+                return entry
+
+    return None
+
+
+def get_all_effects_for_ability(card_id: str, ability_name: str) -> List[Dict[str, Any]]:
+    """
+    Get ALL effects registered for an ability (handles multi-effect abilities).
+
+    For abilities that have multiple effects (e.g., both a modifier AND a guard),
+    this returns all matching entries.
+
+    Args:
+        card_id: The card's ID
+        ability_name: Base ability name (without suffixes)
+
+    Returns:
+        List of effect dicts, each with 'category' and relevant fields.
+        Empty list if no effects found.
+
+    Example:
+        >>> # Diamond Coat has both damage reduction and status immunity
+        >>> effects = get_all_effects_for_ability("me2-41", "Diamond Coat")
+        >>> for effect in effects:
+        >>>     if effect['category'] == 'modifier':
+        >>>         # Handle modifier
+        >>>     elif effect['category'] == 'guard':
+        >>>         # Handle guard
+    """
+    card_data = MASTER_LOGIC_REGISTRY.get(card_id)
+    if not isinstance(card_data, dict):
+        return []
+
+    results = []
+
+    for key, value in card_data.items():
+        if not isinstance(value, dict):
+            continue
+
+        # Match exact name or suffixed name
+        if key == ability_name or key.startswith(f"{ability_name} ("):
+            if 'category' in value:
+                results.append(value)
+            elif 'generator' in value or 'effect' in value:
+                # Legacy format - infer category
+                results.append({**value, 'category': 'attack'})
+
+    return results
+
+
+def get_ability_category(card_id: str, ability_name: str) -> Optional[str]:
+    """
+    Get the category of an ability ('attack', 'activatable', 'modifier', 'guard', 'hook').
+
+    Convenience function that just returns the category string.
+
+    Args:
+        card_id: The card's ID
+        ability_name: The ability name
+
+    Returns:
+        Category string or None if not found.
+
+    Example:
+        >>> category = get_ability_category("me2-11", "Agile")
+        >>> if category == 'modifier':
+        >>>     # This is a passive ability, don't generate actions
+    """
+    info = get_ability_info(card_id, ability_name)
+    if info:
+        return info.get('category')
+    return None
+
+
+def is_activatable_ability(card_id: str, ability_name: str) -> bool:
+    """
+    Check if an ability generates actions (is player-activatable).
+
+    Returns True for 'attack' and 'activatable' categories.
+    Returns False for 'modifier', 'guard', 'hook' categories.
+
+    Args:
+        card_id: The card's ID
+        ability_name: The ability name
+
+    Returns:
+        True if ability generates actions, False otherwise.
+    """
+    category = get_ability_category(card_id, ability_name)
+    return category in ('attack', 'activatable')
+
+
+# ============================================================================
+# CARD LOGIC ROUTER
 # ============================================================================
 
 def get_card_logic(card_id: str, logic_type: str) -> Optional[Callable]:
     """
     Get the implementation function for a card's logic.
-
-    Supports multiple registry formats:
-    - Trainer (new): {"actions": {"play": {"generator": fn, "effect": fn}}}
-    - Pokémon: {"Attack Name": {"generator": fn, "effect": fn}}
-    - Legacy flat: "card_id:effect_name" -> func
 
     Args:
         card_id: The card's ID (e.g., "sv3-125" for Charizard ex, "me1-125" for Rare Candy)
@@ -159,7 +283,7 @@ def get_card_logic(card_id: str, logic_type: str) -> Optional[Callable]:
         Callable function, nested dict, or None if not found
 
     Example:
-        >>> # Trainer card (uses actions wrapper)
+        >>> # Trainer card
         >>> logic_func = get_card_logic("me1-125", "effect")
         >>> generator = get_card_logic("me1-125", "generator")
 
@@ -168,29 +292,20 @@ def get_card_logic(card_id: str, logic_type: str) -> Optional[Callable]:
         >>> if isinstance(attack_logic, dict):
         >>>     effect = attack_logic.get("effect")
         >>>     generator = attack_logic.get("generator")
-
-        >>> # Legacy flat structure
-        >>> logic_func = get_card_logic("sv3-125", "Burning Darkness")
     """
-    # Try nested structure first (new format)
     card_data = MASTER_LOGIC_REGISTRY.get(card_id)
     if isinstance(card_data, dict):
-        # Check for Trainer card format: {"actions": {"play": {"generator": fn, "effect": fn}}}
-        # When looking up "generator" or "effect" for a Trainer, check inside actions.play
+        # When looking up "generator" or "effect" for a Trainer, check activatable entries
         if logic_type in ('generator', 'effect'):
-            actions = card_data.get('actions')
-            if isinstance(actions, dict):
-                play_action = actions.get('play')
-                if isinstance(play_action, dict):
-                    return play_action.get(logic_type)
+            for key, value in card_data.items():
+                if isinstance(value, dict) and value.get('category') == 'activatable':
+                    if key.startswith('Play '):
+                        return value.get(logic_type)
 
-        # For Pokémon attacks/abilities or other lookups, return the nested dict
-        # or a nested dict (for Pokémon: "Attack Name" -> {"effect": ..., "generator": ...})
+        # For Pokémon attacks/abilities, return the nested dict
         return card_data.get(logic_type)
 
-    # Fall back to flat structure (legacy format)
-    lookup_key = f"{card_id}:{logic_type}"
-    return MASTER_LOGIC_REGISTRY.get(lookup_key)
+    return None
 
 
 # ============================================================================
@@ -220,9 +335,10 @@ def get_card_modifier(card_id: str, modifier_type: str) -> Optional[Callable]:
     """
     card_data = MASTER_LOGIC_REGISTRY.get(card_id)
     if isinstance(card_data, dict):
-        modifiers = card_data.get("modifiers")
-        if isinstance(modifiers, dict):
-            return modifiers.get(modifier_type)
+        for key, value in card_data.items():
+            if isinstance(value, dict) and value.get('category') == 'modifier':
+                if value.get('modifier_type') == modifier_type:
+                    return value.get('effect')
     return None
 
 
@@ -250,9 +366,10 @@ def get_card_guard(card_id: str, guard_type: str) -> Optional[Callable]:
     """
     card_data = MASTER_LOGIC_REGISTRY.get(card_id)
     if isinstance(card_data, dict):
-        guards = card_data.get("guards")
-        if isinstance(guards, dict):
-            return guards.get(guard_type)
+        for key, value in card_data.items():
+            if isinstance(value, dict) and value.get('category') == 'guard':
+                if value.get('guard_type') == guard_type:
+                    return value.get('effect')
     return None
 
 
@@ -279,9 +396,10 @@ def get_card_hooks(card_id: str, hook_type: str) -> Optional[Callable]:
     """
     card_data = MASTER_LOGIC_REGISTRY.get(card_id)
     if isinstance(card_data, dict):
-        hooks = card_data.get("hooks")
-        if isinstance(hooks, dict):
-            return hooks.get(hook_type)
+        for key, value in card_data.items():
+            if isinstance(value, dict) and value.get('category') == 'hook':
+                if value.get('trigger') == hook_type:
+                    return value.get('effect')
     return None
 
 
@@ -300,9 +418,11 @@ def get_all_modifiers_for_type(modifier_type: str) -> Dict[str, Callable]:
     result = {}
     for card_id, card_data in MASTER_LOGIC_REGISTRY.items():
         if isinstance(card_data, dict):
-            modifiers = card_data.get("modifiers")
-            if isinstance(modifiers, dict) and modifier_type in modifiers:
-                result[card_id] = modifiers[modifier_type]
+            for key, value in card_data.items():
+                if isinstance(value, dict) and value.get('category') == 'modifier':
+                    if value.get('modifier_type') == modifier_type:
+                        result[card_id] = value.get('effect')
+                        break
     return result
 
 
@@ -321,9 +441,11 @@ def get_all_guards_for_type(guard_type: str) -> Dict[str, Callable]:
     result = {}
     for card_id, card_data in MASTER_LOGIC_REGISTRY.items():
         if isinstance(card_data, dict):
-            guards = card_data.get("guards")
-            if isinstance(guards, dict) and guard_type in guards:
-                result[card_id] = guards[guard_type]
+            for key, value in card_data.items():
+                if isinstance(value, dict) and value.get('category') == 'guard':
+                    if value.get('guard_type') == guard_type:
+                        result[card_id] = value.get('effect')
+                        break
     return result
 
 
@@ -342,9 +464,11 @@ def get_all_hooks_for_type(hook_type: str) -> Dict[str, Callable]:
     result = {}
     for card_id, card_data in MASTER_LOGIC_REGISTRY.items():
         if isinstance(card_data, dict):
-            hooks = card_data.get("hooks")
-            if isinstance(hooks, dict) and hook_type in hooks:
-                result[card_id] = hooks[hook_type]
+            for key, value in card_data.items():
+                if isinstance(value, dict) and value.get('category') == 'hook':
+                    if value.get('trigger') == hook_type:
+                        result[card_id] = value.get('effect')
+                        break
     return result
 
 
@@ -476,39 +600,6 @@ def check_global_block(state: 'GameState', guard_type: str, context: dict = None
     """
     guards = scan_global_guards(state, guard_type, context)
     return any(is_blocking for _, _, is_blocking in guards)
-
-
-# ============================================================================
-# LEGACY COMPATIBILITY (for existing tests)
-# ============================================================================
-
-# These registries are kept for backwards compatibility
-# New code should use get_card_logic() instead
-ABILITY_REGISTRY: Dict[str, Callable] = {}
-ATTACK_DAMAGE_REGISTRY: Dict[str, Callable] = {}
-ATTACK_EFFECT_REGISTRY: Dict[str, Callable] = {}
-ATTACK_VALIDATOR_REGISTRY: Dict[str, Callable] = {}
-LOGIC_MAP: Dict[str, Callable] = {}
-
-
-def get_ability_function(ability_name: str) -> Optional[Callable]:
-    """Legacy function for backwards compatibility."""
-    return ABILITY_REGISTRY.get(ability_name)
-
-
-def get_attack_damage_function(attack_name: str) -> Optional[Callable]:
-    """Legacy function for backwards compatibility."""
-    return ATTACK_DAMAGE_REGISTRY.get(attack_name)
-
-
-def get_attack_effect_function(attack_name: str) -> Optional[Callable]:
-    """Legacy function for backwards compatibility."""
-    return ATTACK_EFFECT_REGISTRY.get(attack_name)
-
-
-def get_attack_validator(attack_name: str) -> Optional[Callable]:
-    """Legacy function for backwards compatibility."""
-    return ATTACK_VALIDATOR_REGISTRY.get(attack_name)
 
 
 # ============================================================================

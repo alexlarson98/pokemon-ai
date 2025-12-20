@@ -1461,29 +1461,76 @@ class PokemonEngine:
 
             # Check each ability on the card
             for ability in card_def.abilities:
-                # Check if card has a custom action generator
-                card_logic = logic_registry.get_card_logic(pokemon.card_id, ability.name)
+                # Use unified schema to get ability info
+                ability_info = logic_registry.get_ability_info(pokemon.card_id, ability.name)
 
-                if isinstance(card_logic, dict) and 'generator' in card_logic:
-                    # Use custom generator to create specific actions
-                    generator = card_logic['generator']
-                    generated_actions = generator(state, pokemon, player)
-                    actions.extend(generated_actions)
+                if ability_info:
+                    # Unified schema: check category to determine if it generates actions
+                    category = ability_info.get('category')
+
+                    if category in ('attack', 'activatable'):
+                        # This ability generates actions
+                        if 'generator' in ability_info:
+                            generator = ability_info['generator']
+                            generated_actions = generator(state, pokemon, player)
+                            actions.extend(generated_actions)
+                        else:
+                            # Has category but no generator - create generic action
+                            if ability.name not in pokemon.abilities_used_this_turn:
+                                actions.append(Action(
+                                    action_type=ActionType.USE_ABILITY,
+                                    player_id=player.player_id,
+                                    card_id=pokemon.id,
+                                    ability_name=ability.name,
+                                    metadata={"ability_name": ability.name}
+                                ))
+                    # else: modifier/guard/hook - don't generate actions
+
                 else:
-                    # Fall back to default logic
-                    # Check 'Once Per Turn' restriction
-                    if hasattr(ability, 'once_per_turn') and ability.once_per_turn:
-                        # Check if already used this turn
+                    # No registry entry - check legacy format or infer from ability
+                    card_logic = logic_registry.get_card_logic(pokemon.card_id, ability.name)
+
+                    if isinstance(card_logic, dict) and 'generator' in card_logic:
+                        # Legacy format with generator
+                        generator = card_logic['generator']
+                        generated_actions = generator(state, pokemon, player)
+                        actions.extend(generated_actions)
+                    else:
+                        # No registry entry at all - use ability's category field
+                        # or fall back to is_activatable for backwards compat
+                        ability_category = getattr(ability, 'category', None)
+
+                        if ability_category:
+                            # Use category from ability definition
+                            if ability_category not in ('activatable', 'attack'):
+                                continue  # modifier/guard/hook - skip
+                        else:
+                            # Final fallback: use is_activatable flag
+                            is_activatable = getattr(ability, 'is_activatable', None)
+                            if is_activatable is None:
+                                # Parse text as last resort
+                                ability_text = getattr(ability, 'text', '').lower()
+                                is_activatable = (
+                                    'once during your turn' in ability_text or
+                                    'you may use' in ability_text or
+                                    'as often as you like during your turn' in ability_text
+                                )
+
+                            if not is_activatable:
+                                continue  # Passive ability - skip
+
+                        # Check 'Once Per Turn' restriction
                         if ability.name in pokemon.abilities_used_this_turn:
                             continue
 
-                    # Create generic USE_ABILITY action
-                    actions.append(Action(
-                        action_type=ActionType.USE_ABILITY,
-                        player_id=player.player_id,
-                        card_id=pokemon.id,
-                        metadata={"ability_name": ability.name}
-                    ))
+                        # Create generic USE_ABILITY action
+                        actions.append(Action(
+                            action_type=ActionType.USE_ABILITY,
+                            player_id=player.player_id,
+                            card_id=pokemon.id,
+                            ability_name=ability.name,
+                            metadata={"ability_name": ability.name}
+                        ))
 
         return actions
 

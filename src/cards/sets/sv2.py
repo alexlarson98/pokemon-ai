@@ -135,57 +135,58 @@ def chien_pao_ex_hail_blade_effect(state: GameState, card: CardInstance, action:
 
 
 # ============================================================================
-# SV2 LOGIC REGISTRY
+# SV2 LOGIC REGISTRY (Unified Schema)
 # ============================================================================
 
 SV2_LOGIC = {
     "sv2-61": {  # Chien Pao ex
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
     "sv2-236": {  # Chien Pao ex
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
     "sv2-261": {  # Chien Pao ex
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
     "sv2-274": {  # Chien Pao ex
         "Hail Blade": {
+            "category": "attack",
             "generator": chien_pao_ex_hail_blade_actions,
             "effect": chien_pao_ex_hail_blade_effect,
         }
     },
-    
+
     "sv2-185": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
     "sv2-254": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
     "sv2-269": {  # Iono
-        "actions": {
-            "play": {
-                "generator": iono_actions,
-                "effect": iono_effect,
-            }
-        }
+        "Play Iono": {
+            "category": "activatable",
+            "generator": iono_actions,
+            "effect": iono_effect,
+        },
     },
 }
