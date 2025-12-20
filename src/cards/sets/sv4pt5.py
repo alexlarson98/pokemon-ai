@@ -39,6 +39,14 @@ from .svp import (
     charizard_ex_burning_darkness_effect,
 )
 
+# Import Pidgeot ex logic from sv3 (first release)
+from .sv3 import (
+    pidgeot_ex_quick_search_actions,
+    pidgeot_ex_quick_search_effect,
+    pidgeot_ex_blustery_wind_actions,
+    pidgeot_ex_blustery_wind_effect,
+)
+
 
 # ============================================================================
 # CHARMELEON - VERSION 3: COMBUSTION + FLARE VEIL (sv4pt5-8, sv4pt5-110)
@@ -291,6 +299,20 @@ SV4PT5_LOGIC = {
             "category": "hook",
             "trigger": "on_evolve",
             "effect": charizard_ex_infernal_reign_hook,
+        },
+    },
+
+    # Pidgeot ex - Reprint from sv3
+    "sv4pt5-221": {
+        "Quick Search": {
+            "category": "activatable",
+            "generator": pidgeot_ex_quick_search_actions,
+            "effect": pidgeot_ex_quick_search_effect,
+        },
+        "Blustery Wind": {
+            "category": "attack",
+            "generator": pidgeot_ex_blustery_wind_actions,
+            "effect": pidgeot_ex_blustery_wind_effect,
         },
     },
 }
