@@ -1458,16 +1458,6 @@ class PokemonEngine:
         pokemon_in_play = player.board.get_all_pokemon()
 
         for pokemon in pokemon_in_play:
-            # Check if abilities are allowed for this Pokémon
-            can_use_ability = self.check_global_permission(
-                state,
-                "ability",
-                {"card_id": pokemon.id, "player_id": player.player_id}
-            )
-
-            if not can_use_ability:
-                continue  # Abilities blocked (e.g., by Klefki)
-
             # Get card definition to check for abilities
             card_def = create_card(pokemon.card_id)
             if not card_def or not hasattr(card_def, 'abilities'):
@@ -1475,6 +1465,16 @@ class PokemonEngine:
 
             # Check each ability on the card
             for ability in card_def.abilities:
+                # Check if this specific ability is allowed (Klefki blocks per-ability)
+                can_use_ability = self.check_global_permission(
+                    state,
+                    "ability",
+                    {"card_id": pokemon.id, "player_id": player.player_id, "ability_name": ability.name}
+                )
+
+                if not can_use_ability:
+                    continue  # This ability is blocked (e.g., by Klefki's Mischievous Lock)
+
                 # Use unified schema to get ability info
                 ability_info = logic_registry.get_ability_info(pokemon.card_id, ability.name)
 
@@ -3093,6 +3093,11 @@ class PokemonEngine:
                 )
                 state.push_step(attach_step)
 
+        elif callback == "klefki_stick_n_draw_complete":
+            # After discarding 1 card, draw 2 cards
+            from actions import draw_card
+            state = draw_card(state, completed_step.player_id, 2)
+
         return state
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:
@@ -3286,20 +3291,35 @@ class PokemonEngine:
             acting_card_id = context.get("card_id")
 
             if acting_card_id and acting_player_id is not None:
-                # Check opponent's Active Spot for passive ability blockers
-                opponent_id = 1 - acting_player_id
-                opponent = state.get_player(opponent_id)
+                # Get the card trying to use its ability
+                acting_player = state.get_player(acting_player_id)
+                acting_card = None
+                for pokemon in acting_player.board.get_all_pokemon():
+                    if pokemon.id == acting_card_id:
+                        acting_card = pokemon
+                        break
 
-                if opponent.board.active_spot:
-                    opponent_active = opponent.board.active_spot
+                if acting_card:
+                    # Check BOTH players' Active Spots for passive ability blockers
+                    for player in state.players:
+                        if player.board.active_spot:
+                            active_pokemon = player.board.active_spot
 
-                    # Check if opponent's Active has "Block Abilities" effect
-                    # This is typically stored in card-specific logic or as an active effect
-                    # For Klefki, it would check if the card has this passive ability
-                    for effect in state.active_effects:
-                        if (effect.source_card_id == opponent_active.id and
-                            effect.params.get("blocks_opponent_abilities")):
-                            return False
+                            # Check if this Active Pokemon has a passive ability lock
+                            from cards import logic_registry
+                            card_logic = logic_registry.MASTER_LOGIC_REGISTRY.get(active_pokemon.card_id, {})
+
+                            for ability_name, ability_info in card_logic.items():
+                                if isinstance(ability_info, dict) and ability_info.get('category') == 'passive':
+                                    if ability_info.get('effect_type') == 'ability_lock':
+                                        # Check if condition is met
+                                        condition_fn = ability_info.get('condition')
+                                        if condition_fn and condition_fn(state, active_pokemon):
+                                            # Check if effect blocks this ability
+                                            effect_fn = ability_info.get('effect')
+                                            ability_being_used = context.get('ability_name', '')
+                                            if effect_fn and effect_fn(state, active_pokemon, acting_card, ability_being_used):
+                                                return False
 
         # Check all active effects for action blocks
         if hasattr(state, 'active_effects') and state.active_effects:
