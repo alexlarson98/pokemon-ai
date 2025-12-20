@@ -2,13 +2,11 @@
 Generate AI implementation prompts for Pokemon TCG cards (Pokemon & Trainers)
 
 Features:
-- "4 Pillars" Architecture (Actions, Modifiers, Guards, Hooks)
-- "Stack Architecture" for multi-step effects (SearchDeckStep, SelectFromZoneStep, etc.)
-- HYBRID DICT STRUCTURE:
-    - Pokemon: "Attack Name": {generator, effect}
-    - Trainers: "actions": {"play": {generator, effect}}
+- UNIFIED ABILITY SCHEMA with explicit 'category' field
+- Categories: attack, activatable, modifier, guard, hook
+- Multi-effect abilities use suffixed entries: "Ability (Modifier)", "Ability (Guard)"
+- Stack Architecture for multi-step effects (SearchDeckStep, SelectFromZoneStep, etc.)
 - Automatic Reprints handling
-- Fixes formatting issues
 
 Usage:
     python generate_card_prompt.py "Charmander"
@@ -128,6 +126,8 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         'retreat cost is', 'less retreat cost', 'more retreat cost',
         'takes less damage', 'takes more damage', 'maximum hp', 'get +',
         'attacks do', 'deal more damage', 'hp is', 'bench size', 'have no retreat cost',
+        'has no retreat cost',  # Charmander's Agile
+        'no retreat cost',  # General pattern
         'less damage from attacks', 'more damage from attacks',  # Handles "takes X less damage from attacks"
         'damage done to this', 'damage from attacks',  # Other damage modifier patterns
     ]
@@ -224,18 +224,25 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     card_snake = to_snake_case(card_name)
     
     prompt = f"# {card_name} Implementation\n\n"
-    prompt += "Implement this card using the **4 Pillars Architecture** and **Stack Architecture** (when applicable).\n\n"
+    prompt += "Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).\n\n"
     prompt += "## Architecture Overview\n\n"
-    prompt += "### 4 Pillars Architecture\n"
-    prompt += "- **ACTIONS**: Generator functions return legal actions; Effect functions apply the action\n"
-    prompt += "- **MODIFIERS**: Functions that modify numeric values (damage, HP, retreat cost)\n"
-    prompt += "- **GUARDS**: Functions that block or prevent actions/effects\n"
-    prompt += "- **HOOKS**: Functions triggered by game events (on_play, on_knockout, etc.)\n\n"
+    prompt += "### Unified Ability Schema\n"
+    prompt += "Every attack/ability is registered under its exact name with a `category` field:\n"
+    prompt += "- **attack**: Deals damage, has energy cost, generates actions\n"
+    prompt += "- **activatable**: Player-triggered ability, generates actions\n"
+    prompt += "- **modifier**: Continuously modifies values (retreat cost, damage, HP)\n"
+    prompt += "- **guard**: Blocks effects/conditions (status, damage, trainer cards)\n"
+    prompt += "- **hook**: Event-triggered (on_play, on_knockout, etc.)\n\n"
+    prompt += "### Multi-Effect Abilities\n"
+    prompt += "When an ability has multiple effects, use suffixed entries:\n"
+    prompt += "```python\n"
+    prompt += '"Ability Name (Modifier)": {"category": "modifier", ...},\n'
+    prompt += '"Ability Name (Guard)": {"category": "guard", ...},\n'
+    prompt += "```\n\n"
     prompt += "### Stack Architecture (for multi-step effects)\n"
     prompt += "Use when effects require sequential decisions or costs:\n"
     prompt += "- **SearchDeckStep**: Search deck for cards matching filter criteria\n"
     prompt += "- **SelectFromZoneStep**: Select cards from hand/bench/board with filters\n"
-    prompt += "- **SearchAndAttachState**: For abilities that search and attach energy (use `InterruptPhase.SELECT_COUNT`)\n"
     prompt += "- Push steps onto `state.push_step(step)` - they resolve in LIFO order\n"
     prompt += "- Use `on_complete_callback` for chaining steps\n\n"
     prompt += "### Registry Structure\n"
@@ -393,10 +400,10 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                 prompt += "\n"
 
 
-        # --- HELPER: LOGIC DICT GENERATOR ---
+        # --- HELPER: LOGIC DICT GENERATOR (Unified Schema) ---
         def generate_logic_dict(set_label, target_ids):
             out = f"### Registry (`{set_label}.py`)\n"
-            
+
             # Imports
             if set_label != original_set_id:
                 out += "```python\n"
@@ -406,66 +413,79 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                 out += ")\n\n"
             else:
                 out += "```python\n"
-            
+
             out += f"{set_label.upper().replace('-', '_')}_LOGIC = {{\n"
-            
+
             for cid in target_ids:
                 out += f'    "{cid}": {{\n'
-                
-                # 1. POKEMON ACTIONS (Top Level Keys)
-                if supertype != 'Trainer':
-                    for f in features:
-                        if f['pillar'] == 'ACTION':
-                            # Use NAME as key (Title Case)
-                            gen = f"{card_snake}_{f['snake']}_actions"
-                            eff = f"{card_snake}_{f['snake']}_effect"
-                            out += f'        "{f["name"]}": {{"generator": {gen}, "effect": {eff}}},\n'
 
-                # 2. TRAINER ACTIONS (Nested in 'actions')
-                if supertype == 'Trainer':
-                    trainer_actions = [f for f in features if f['pillar'] == 'ACTION']
-                    if trainer_actions:
-                        out += '        "actions": {\n'
-                        for f in trainer_actions:
+                # Process all features with unified schema (category field)
+                for f in features:
+                    if f['is_attack']:
+                        # Attack with category
+                        gen = f"{card_snake}_{f['snake']}_actions"
+                        eff = f"{card_snake}_{f['snake']}_effect"
+                        out += f'        "{f["name"]}": {{\n'
+                        out += f'            "category": "attack",\n'
+                        out += f'            "generator": {gen},\n'
+                        out += f'            "effect": {eff},\n'
+                        out += f'        }},\n'
+
+                    elif f['pillar'] == 'ACTION':
+                        # Activatable ability
+                        if supertype == 'Trainer':
                             gen = f"{card_snake}_actions"
                             eff = f"{card_snake}_effect"
-                            out += f'            "play": {{"generator": {gen}, "effect": {eff}}},\n'
-                        out += '        },\n'
+                            out += '        "actions": {\n'
+                            out += f'            "play": {{"category": "activatable", "generator": {gen}, "effect": {eff}}},\n'
+                            out += '        },\n'
+                        else:
+                            gen = f"{card_snake}_{f['snake']}_actions"
+                            eff = f"{card_snake}_{f['snake']}_effect"
+                            out += f'        "{f["name"]}": {{\n'
+                            out += f'            "category": "activatable",\n'
+                            out += f'            "generator": {gen},\n'
+                            out += f'            "effect": {eff},\n'
+                            out += f'        }},\n'
 
-                # 3. MODIFIERS (Standard Key)
-                modifiers = [f for f in features if f['pillar'] == 'MODIFIER']
-                if modifiers:
-                    out += '        "modifiers": {\n'
-                    for mod in modifiers:
-                        key = "retreat_cost" if "retreat" in mod['text'].lower() else "damage"
-                        if "hp" in mod['text'].lower(): key = "max_hp"
-                        
-                        func = f"{card_snake}_modifier" if supertype == 'Trainer' else f"{card_snake}_{mod['snake']}_modifier"
-                        out += f'            "{key}": {func},\n'
-                    out += '        },\n'
+                    elif f['pillar'] == 'MODIFIER':
+                        # Modifier ability
+                        modifier_type = "retreat_cost" if "retreat" in f['text'].lower() else "damage_taken"
+                        if "hp" in f['text'].lower(): modifier_type = "max_hp"
 
-                # 4. GUARDS (Standard Key)
-                guards = [f for f in features if f['pillar'] == 'GUARD']
-                if guards:
-                    out += '        "guards": {\n'
-                    for g in guards:
-                        key = "status_condition" if "asleep" in g['text'].lower() else "effect_prevention"
-                        func = f"{card_snake}_guard" if supertype == 'Trainer' else f"{card_snake}_{g['snake']}_guard"
-                        out += f'            "{key}": {func},\n'
-                    out += '        },\n'
+                        func = f"{card_snake}_modifier" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_modifier"
+                        out += f'        "{f["name"]}": {{\n'
+                        out += f'            "category": "modifier",\n'
+                        out += f'            "modifier_type": "{modifier_type}",\n'
+                        out += f'            "scope": "self",\n'
+                        out += f'            "effect": {func},\n'
+                        out += f'        }},\n'
 
-                # 5. HOOKS (Standard Key)
-                hooks = [f for f in features if f['pillar'] == 'HOOK']
-                if hooks:
-                    out += '        "hooks": {\n'
-                    for h in hooks:
-                        key = "on_play_pokemon" if "play" in h['text'].lower() else "on_knockout"
-                        func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{h['snake']}_hook"
-                        out += f'            "{key}": {func},\n'
-                    out += '        },\n'
+                    elif f['pillar'] == 'GUARD':
+                        # Guard ability
+                        guard_type = "status_condition" if any(s in f['text'].lower() for s in ["asleep", "paralyzed", "confused", "burned", "poisoned"]) else "damage"
+
+                        func = f"{card_snake}_guard" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_guard"
+                        out += f'        "{f["name"]}": {{\n'
+                        out += f'            "category": "guard",\n'
+                        out += f'            "guard_type": "{guard_type}",\n'
+                        out += f'            "scope": "self",\n'
+                        out += f'            "effect": {func},\n'
+                        out += f'        }},\n'
+
+                    elif f['pillar'] == 'HOOK':
+                        # Hook ability
+                        trigger = "on_play" if "play" in f['text'].lower() else "on_knockout" if "knocked out" in f['text'].lower() else "on_event"
+
+                        func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
+                        out += f'        "{f["name"]}": {{\n'
+                        out += f'            "category": "hook",\n'
+                        out += f'            "trigger": "{trigger}",\n'
+                        out += f'            "effect": {func},\n'
+                        out += f'        }},\n'
 
                 out += f'    }},\n'
-                
+
             out += "}\n```\n\n"
             return out
 
