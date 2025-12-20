@@ -321,3 +321,45 @@ def iono_effect(state: GameState, card: CardInstance, action: Action) -> GameSta
                 player.hand.add_card(drawn_card)
 
     return state
+
+
+# ============================================================================
+# PROFESSOR'S RESEARCH
+# ============================================================================
+
+def professors_research_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate Professor's Research action.
+
+    Professor's Research is always playable (discarding 0 cards is valid).
+    """
+    return [Action(
+        action_type=ActionType.PLAY_SUPPORTER,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Professor's Research (discard hand, draw 7)"
+    )]
+
+
+def professors_research_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Professor's Research - Discard your hand and draw 7 cards.
+
+    Simple effect with no user choices - just discard everything and draw 7.
+    """
+    player = state.get_player(action.player_id)
+
+    # Discard entire hand (excluding the Professor's Research card itself, already played)
+    hand_cards = player.hand.cards.copy()
+    for hand_card in hand_cards:
+        player.hand.remove_card(hand_card.id)
+        player.discard.add_card(hand_card)
+
+    # Draw 7 cards
+    cards_to_draw = min(7, player.deck.count())
+    for _ in range(cards_to_draw):
+        if not player.deck.is_empty():
+            drawn_card = player.deck.cards.pop(0)
+            player.hand.add_card(drawn_card)
+
+    return state

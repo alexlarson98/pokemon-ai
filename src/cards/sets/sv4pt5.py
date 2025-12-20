@@ -16,7 +16,9 @@ from cards.library.trainers import (
     ultra_ball_effect,
     ultra_ball_actions,
     iono_actions,
-    iono_effect
+    iono_effect,
+    professors_research_actions,
+    professors_research_effect,
 )
 from .sv2 import chien_pao_ex_hail_blade_actions, chien_pao_ex_hail_blade_effect
 from .sv3pt5 import (
@@ -235,6 +237,20 @@ SV4PT5_LOGIC = {
             "category": "activatable",
             "generator": ultra_ball_actions,
             "effect": ultra_ball_effect,
+        },
+    },
+    "sv4pt5-87": {  # Professor's Research
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
+        },
+    },
+    "sv4pt5-88": {  # Professor's Research
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
         },
     },
 

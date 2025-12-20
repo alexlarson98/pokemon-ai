@@ -27,7 +27,9 @@ from cards.sets.sv6pt5 import SV6PT5_LOGIC
 from cards.sets.sv7 import SV7_LOGIC
 from cards.sets.sv8 import SV8_LOGIC
 from cards.sets.sv8pt5 import SV8PT5_LOGIC
+from cards.sets.sv9 import SV9_LOGIC
 from cards.sets.sv10 import SV10_LOGIC
+from cards.sets.zsv10pt5 import ZSV10PT5_LOGIC
 from cards.sets.me1 import ME1_LOGIC
 from cards.sets.me2 import ME2_LOGIC
 from cards.sets.svp import SVP_LOGIC
@@ -45,7 +47,9 @@ __all__ = [
     'SV7_LOGIC',
     'SV8_LOGIC',
     'SV8PT5_LOGIC',
+    'SV9_LOGIC',
     'SV10_LOGIC',
+    'ZSV10PT5_LOGIC',
     'ME1_LOGIC',
     'ME2_LOGIC',
     'SVP_LOGIC',

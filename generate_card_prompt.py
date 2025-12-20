@@ -247,7 +247,7 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     prompt += "- Use `on_complete_callback` for chaining steps\n\n"
     prompt += "### Registry Structure\n"
     prompt += "- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.\n"
-    prompt += "- **Trainers:** Use `\"actions\": {\"play\": ...}`.\n\n"
+    prompt += "- **Trainers:** Use `\"Play CardName\": {\"category\": \"activatable\", ...}`.\n\n"
 
     for version_num, (signature, duplicate_cards) in enumerate(card_groups.items(), 1):
         first_card = find_first_release(duplicate_cards)
@@ -436,9 +436,11 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                         if supertype == 'Trainer':
                             gen = f"{card_snake}_actions"
                             eff = f"{card_snake}_effect"
-                            out += '        "actions": {\n'
-                            out += f'            "play": {{"category": "activatable", "generator": {gen}, "effect": {eff}}},\n'
-                            out += '        },\n'
+                            out += f'        "Play {card_name}": {{\n'
+                            out += f'            "category": "activatable",\n'
+                            out += f'            "generator": {gen},\n'
+                            out += f'            "effect": {eff},\n'
+                            out += f'        }},\n'
                         else:
                             gen = f"{card_snake}_{f['snake']}_actions"
                             eff = f"{card_snake}_{f['snake']}_effect"

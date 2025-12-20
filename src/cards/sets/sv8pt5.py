@@ -16,6 +16,10 @@ from .sv6pt5 import (
     duskull_mumble_actions,
     duskull_mumble_effect,
 )
+from cards.library.trainers import (
+    professors_research_actions,
+    professors_research_effect,
+)
 
 
 # ============================================================================
@@ -136,6 +140,36 @@ SV8PT5_LOGIC = {
             "guard_type": "status_condition",
             "scope": "self",
             "effect": hoothoot_insomnia_guard,
+        },
+    },
+
+    # Professor's Research reprints
+    "sv8pt5-122": {
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
+        },
+    },
+    "sv8pt5-123": {
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
+        },
+    },
+    "sv8pt5-124": {
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
+        },
+    },
+    "sv8pt5-125": {
+        "Play Professor's Research": {
+            "category": "activatable",
+            "generator": professors_research_actions,
+            "effect": professors_research_effect,
         },
     },
 }
