@@ -39,8 +39,24 @@ def detect_stack_pattern(text: str) -> dict:
 
     result = {'use_stack': False, 'pattern': None, 'steps': []}
 
-    # Pattern 1: Search deck effects
-    search_keywords = ['search your deck', 'look at your deck', 'search your discard']
+    # Pattern 1a: Search/select from DISCARD pile (NOT deck)
+    # Examples: Super Rod, Night Stretcher, etc.
+    discard_search_keywords = ['from your discard pile', 'from your discard', 'in your discard pile']
+    if any(k in text_lower for k in discard_search_keywords) and 'search your deck' not in text_lower:
+        result['use_stack'] = True
+        result['pattern'] = 'SELECT_FROM_DISCARD'
+        result['steps'].append('SelectFromZoneStep (zone=ZoneType.DISCARD)')
+
+        # Check for shuffle back to deck
+        if 'shuffle' in text_lower and ('into your deck' in text_lower or 'into deck' in text_lower):
+            result['steps'].append('shuffle_selected_into_deck=True')
+
+        # Check for return to hand
+        if 'put' in text_lower and 'into your hand' in text_lower:
+            result['steps'].append('move_to_hand=True')
+
+    # Pattern 1b: Search deck effects
+    search_keywords = ['search your deck', 'look at your deck']
     if any(k in text_lower for k in search_keywords):
         result['use_stack'] = True
         result['pattern'] = 'SEARCH_DECK'

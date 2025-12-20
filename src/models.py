@@ -537,6 +537,7 @@ class SelectionPurpose(str, Enum):
     BENCH_TARGET = "bench_target"               # Selecting bench destination
     ENERGY_TO_ATTACH = "energy_to_attach"       # Selecting energy card from hand to attach
     SWITCH_TARGET = "switch_target"             # Selecting Pokemon to switch in (Boss's Orders)
+    RECOVER_TO_DECK = "recover_to_deck"         # Recovering cards from discard to deck (Super Rod)
 
 
 class ZoneType(str, Enum):

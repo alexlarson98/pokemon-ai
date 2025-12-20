@@ -1,0 +1,154 @@
+# Ultra Ball Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** sv1-196 | **Type:** Trainer (Item) | **HP:** N/A
+
+### Feature: play (ACTION)
+_You can use this card only if you discard 2 other cards from your hand. Search your deck for a Pokemon, reveal it, and put it into your hand. Then, shuffle your deck. You may play any number of Item cards during your turn._
+
+- Implement `ultra_ball_actions(state, card, player)` (Generator)
+- Implement `ultra_ball_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    # SelectFromZoneStep (DISCARD_COST)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (DISCARD_COST)`
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Registry (`sv1.py`)
+```python
+SV1_LOGIC = {
+    "sv1-196": {
+        "Play Ultra Ball": {
+            "category": "activatable",
+            "generator": ultra_ball_actions,
+            "effect": ultra_ball_effect,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv4pt5-91 | **Type:** Trainer (Item) | **HP:** N/A
+
+### Feature: play (ACTION)
+_You can use this card only if you discard 2 other cards from your hand. Search your deck for a Pokemon, reveal it, and put it into your hand. Then, shuffle your deck. You may play any number of Item cards during your turn._
+
+- Implement `ultra_ball_actions(state, card, player)` (Generator)
+- Implement `ultra_ball_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    # SelectFromZoneStep (DISCARD_COST)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (DISCARD_COST)`
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Registry (`sv4pt5.py`)
+```python
+SV4PT5_LOGIC = {
+    "sv4pt5-91": {
+        "Play Ultra Ball": {
+            "category": "activatable",
+            "generator": ultra_ball_actions,
+            "effect": ultra_ball_effect,
+        },
+    },
+}
+```
+
+## Version 3
+
+**Card IDs:** me1-131 | **Type:** Trainer (Item) | **HP:** N/A
+
+### Feature: play (ACTION)
+_You can use this card only if you discard 2 other cards from your hand.  Search your deck for a Pokemon, reveal it, and put it into your hand. Then, shuffle your deck. You may play any number of Item cards during your turn._
+
+- Implement `ultra_ball_actions(state, card, player)` (Generator)
+- Implement `ultra_ball_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    # SelectFromZoneStep (DISCARD_COST)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (DISCARD_COST)`
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Registry (`me1.py`)
+```python
+ME1_LOGIC = {
+    "me1-131": {
+        "Play Ultra Ball": {
+            "category": "activatable",
+            "generator": ultra_ball_actions,
+            "effect": ultra_ball_effect,
+        },
+    },
+}
+```
+

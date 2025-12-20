@@ -15,7 +15,7 @@ Cards first released in this set should define their logic here.
 from typing import List
 from models import GameState, CardInstance, Action, ActionType, EnergyType, PlayerState
 from actions import apply_damage, calculate_damage, get_all_attached_energy
-from ..library.trainers import iono_effect, iono_actions
+from ..library.trainers import iono_effect, iono_actions, super_rod_actions, super_rod_effect
 
 
 # ============================================================================
@@ -187,6 +187,22 @@ SV2_LOGIC = {
             "category": "activatable",
             "generator": iono_actions,
             "effect": iono_effect,
+        },
+    },
+
+    # Super Rod - Item
+    "sv2-188": {
+        "Play Super Rod": {
+            "category": "activatable",
+            "generator": super_rod_actions,
+            "effect": super_rod_effect,
+        },
+    },
+    "sv2-276": {
+        "Play Super Rod": {
+            "category": "activatable",
+            "generator": super_rod_actions,
+            "effect": super_rod_effect,
         },
     },
 }

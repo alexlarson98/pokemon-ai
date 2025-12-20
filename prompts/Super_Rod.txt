@@ -1,0 +1,77 @@
+# Super Rod Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv2-188, sv2-276 | **Type:** Trainer (Item) | **HP:** N/A
+
+### Feature: play (ACTION)
+_Shuffle up to 3 in any combination of Pokemon and Basic Energy cards from your discard pile into your deck. You may play any number of Item cards during your turn._
+
+- Implement `super_rod_actions(state, card, player)` (Generator)
+- Implement `super_rod_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SELECT_FROM_DISCARD`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_selected_into_deck=True
+    # SelectFromZoneStep (zone=ZoneType.DISCARD)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (zone=ZoneType.DISCARD)`
+  - `shuffle_selected_into_deck=True`
+
+### Registry (`sv2.py`)
+```python
+SV2_LOGIC = {
+    "sv2-188": {
+        "Play Super Rod": {
+            "category": "activatable",
+            "generator": super_rod_actions,
+            "effect": super_rod_effect,
+        },
+    },
+    "sv2-276": {
+        "Play Super Rod": {
+            "category": "activatable",
+            "generator": super_rod_actions,
+            "effect": super_rod_effect,
+        },
+    },
+}
+```
+

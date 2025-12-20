@@ -690,3 +690,95 @@ def bosss_orders_effect(state: GameState, card: CardInstance, action: Action) ->
 
     state.push_step(select_target_step)
     return state
+
+
+# ============================================================================
+# SUPER ROD - ITEM (sv2-188, sv2-276)
+# ============================================================================
+
+def super_rod_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Super Rod item card.
+
+    Super Rod: Shuffle up to 3 in any combination of Pokemon and Basic Energy
+    cards from your discard pile into your deck.
+
+    Can only be played if:
+    1. Player has at least 1 Pokemon or Basic Energy in discard pile
+
+    Args:
+        state: Current game state
+        card: Super Rod CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List with play action if conditions are met, empty list otherwise
+    """
+    from cards.registry import create_card
+    from cards.base import PokemonCard, EnergyCard
+    from models import Subtype
+
+    # Check if there are any valid targets in the discard pile
+    has_valid_target = False
+    for discard_card in player.discard.cards:
+        card_def = create_card(discard_card.card_id)
+        if card_def:
+            # Pokemon cards are valid
+            if isinstance(card_def, PokemonCard):
+                has_valid_target = True
+                break
+            # Basic Energy cards are valid
+            if isinstance(card_def, EnergyCard) and Subtype.BASIC in card_def.subtypes:
+                has_valid_target = True
+                break
+
+    if not has_valid_target:
+        return []
+
+    return [Action(
+        action_type=ActionType.PLAY_ITEM,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Play Super Rod (recover up to 3 Pokemon/Basic Energy from discard)"
+    )]
+
+
+def super_rod_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Super Rod item effect.
+
+    Shuffle up to 3 in any combination of Pokemon and Basic Energy cards
+    from your discard pile into your deck.
+
+    Uses Stack Architecture:
+    1. Push SelectFromZoneStep targeting player's discard pile
+    2. On complete callback shuffles selected cards into deck
+
+    Args:
+        state: Current game state
+        card: Super Rod CardInstance
+        action: Play item action
+
+    Returns:
+        Modified GameState with selection step pushed
+    """
+    from models import SelectFromZoneStep, ZoneType, SelectionPurpose
+
+    # Push SelectFromZoneStep targeting player's DISCARD pile
+    # Filter: Pokemon OR Basic Energy
+    select_recover_step = SelectFromZoneStep(
+        source_card_id=card.id,
+        source_card_name="Super Rod",
+        player_id=action.player_id,
+        purpose=SelectionPurpose.RECOVER_TO_DECK,
+        zone=ZoneType.DISCARD,
+        count=3,
+        min_count=1,  # Must select at least 1
+        exact_count=False,  # "up to 3"
+        filter_criteria={'super_rod_target': True},  # Custom filter: Pokemon OR Basic Energy
+        exclude_card_ids=[card.id],  # Exclude Super Rod itself (will be in discard when step resolves)
+        on_complete_callback="super_rod_shuffle"
+    )
+
+    state.push_step(select_recover_step)
+    return state

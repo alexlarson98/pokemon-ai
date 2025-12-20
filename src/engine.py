@@ -953,6 +953,18 @@ class PokemonEngine:
             if not find_stage_2_chain_for_basic(base_def, card_def):
                 return False
 
+        # Super Rod: Check if card is a Pokemon OR Basic Energy
+        if 'super_rod_target' in filter_criteria and filter_criteria['super_rod_target']:
+            # Pokemon cards are valid
+            if isinstance(card_def, PokemonCard):
+                return True
+            # Basic Energy cards are valid
+            if isinstance(card_def, EnergyCard):
+                if hasattr(card_def, 'subtypes') and Subtype.BASIC in card_def.subtypes:
+                    return True
+            # Anything else is not valid
+            return False
+
         return True
 
     def _find_pokemon_by_id(self, player: PlayerState, pokemon_id: str) -> Optional[CardInstance]:
@@ -3121,6 +3133,29 @@ class PokemonEngine:
 
                     if old_active:
                         opponent.board.bench.append(old_active)
+
+        elif callback == "super_rod_shuffle":
+            # Move selected cards from discard pile into deck, then shuffle
+            from actions import shuffle_deck
+
+            player = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                # Remove selected cards from discard and add to deck
+                for card_id in completed_step.selected_card_ids:
+                    # Find and remove from discard
+                    card = None
+                    for i, discard_card in enumerate(player.discard.cards):
+                        if discard_card.id == card_id:
+                            card = player.discard.cards.pop(i)
+                            break
+
+                    # Add to deck
+                    if card:
+                        player.deck.add_card(card)
+
+                # Shuffle the deck
+                state = shuffle_deck(state, completed_step.player_id)
 
         return state
 
