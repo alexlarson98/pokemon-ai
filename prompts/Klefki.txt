@@ -1,0 +1,137 @@
+# Klefki Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** sv1-96, sv4pt5-159 | **Type:** Pokemon (Basic) | **HP:** 70
+
+### Feature: Mischievous Lock (PASSIVE)
+_As long as this Pokemon is in the Active Spot, Basic Pokemon in play (both yours and your opponent's) have no Abilities, except for Mischievous Lock._
+
+- Implement `klefki_mischievous_lock_condition(state, card)` → bool (Condition Checker)
+  - Returns True when the ability's condition is met
+- Implement `klefki_mischievous_lock_effect(state, card, target_card)` → bool/value (Effect Applier)
+  - Called by engine to check/apply the passive effect
+
+**Note:** Passive abilities are automatically checked by the engine.
+The engine will call `condition` to check if effect applies, then `effect` to apply it.
+
+### Attack: Joust [C] 10
+_Before doing damage, discard all Pokemon Tools from your opponent's Active Pokemon._
+- Implement `klefki_joust_actions` and `klefki_joust_effect`.
+
+### Registry (`sv1.py`)
+```python
+SV1_LOGIC = {
+    "sv1-96": {
+        "Mischievous Lock": {
+            "category": "passive",
+            "condition_type": "in_active_spot",
+            "effect_type": "ability_lock",
+            "scope": "all_basic_pokemon",
+            "condition": klefki_mischievous_lock_condition,
+            "effect": klefki_mischievous_lock_effect,
+        },
+        "Joust": {
+            "category": "attack",
+            "generator": klefki_joust_actions,
+            "effect": klefki_joust_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv4pt5.py`)
+```python
+from cards.sets.sv1 import (
+    klefki_mischievous_lock_condition,
+    klefki_mischievous_lock_effect,
+    klefki_joust_actions,
+    klefki_joust_effect,
+)
+
+SV4PT5_LOGIC = {
+    "sv4pt5-159": {
+        "Mischievous Lock": {
+            "category": "passive",
+            "condition_type": "in_active_spot",
+            "effect_type": "ability_lock",
+            "scope": "all_basic_pokemon",
+            "condition": klefki_mischievous_lock_condition,
+            "effect": klefki_mischievous_lock_effect,
+        },
+        "Joust": {
+            "category": "attack",
+            "generator": klefki_joust_actions,
+            "effect": klefki_joust_effect,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv8-128 | **Type:** Pokemon (Basic) | **HP:** 70
+
+### Attack: Stick 'n' Draw [C] 
+_Discard a card from your hand. If you do, draw 2 cards._
+- Implement `klefki_stick_n_draw_actions` and `klefki_stick_n_draw_effect`.
+
+**Stack Architecture Required** (Pattern: `DISCARD_COST`)
+Resolution Steps:
+  - `SelectFromZoneStep (DISCARD_COST)`
+
+### Attack: Hook [C] 20
+- Implement `klefki_hook_actions` and `klefki_hook_effect`.
+
+### Registry (`sv8.py`)
+```python
+SV8_LOGIC = {
+    "sv8-128": {
+        "Stick 'n' Draw": {
+            "category": "attack",
+            "generator": klefki_stick_n_draw_actions,
+            "effect": klefki_stick_n_draw_effect,
+        },
+        "Hook": {
+            "category": "attack",
+            "generator": klefki_hook_actions,
+            "effect": klefki_hook_effect,
+        },
+    },
+}
+```
+

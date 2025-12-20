@@ -47,6 +47,14 @@ from .sv3 import (
     pidgeot_ex_blustery_wind_effect,
 )
 
+# Import Klefki Version 1 logic from sv1 (first release)
+from .sv1 import (
+    klefki_mischievous_lock_condition,
+    klefki_mischievous_lock_effect,
+    klefki_joust_actions,
+    klefki_joust_effect,
+)
+
 
 # ============================================================================
 # CHARMELEON - VERSION 3: COMBUSTION + FLARE VEIL (sv4pt5-8, sv4pt5-110)
@@ -313,6 +321,23 @@ SV4PT5_LOGIC = {
             "category": "attack",
             "generator": pidgeot_ex_blustery_wind_actions,
             "effect": pidgeot_ex_blustery_wind_effect,
+        },
+    },
+
+    # Klefki - Reprint from sv1 (Mischievous Lock passive + Joust attack)
+    "sv4pt5-159": {
+        "Mischievous Lock": {
+            "category": "passive",
+            "condition_type": "in_active_spot",
+            "effect_type": "ability_lock",
+            "scope": "all_basic_pokemon",
+            "condition": klefki_mischievous_lock_condition,
+            "effect": klefki_mischievous_lock_effect,
+        },
+        "Joust": {
+            "category": "attack",
+            "generator": klefki_joust_actions,
+            "effect": klefki_joust_effect,
         },
     },
 }
