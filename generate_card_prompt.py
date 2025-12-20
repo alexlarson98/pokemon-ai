@@ -3,8 +3,8 @@ Generate AI implementation prompts for Pokemon TCG cards (Pokemon & Trainers)
 
 Features:
 - UNIFIED ABILITY SCHEMA with explicit 'category' field
-- Categories: attack, activatable, modifier, guard, hook
-- Multi-effect abilities use suffixed entries: "Ability (Modifier)", "Ability (Guard)"
+- Categories: attack, activatable, passive, modifier, guard, hook
+- Multi-effect abilities use suffixed entries: "Ability (Passive)", "Ability (Modifier)", "Ability (Guard)"
 - Stack Architecture for multi-step effects (SearchDeckStep, SelectFromZoneStep, etc.)
 - Automatic Reprints handling
 
@@ -93,7 +93,16 @@ def detect_stack_pattern(text: str) -> dict:
 # --- CLASSIFICATION LOGIC ---
 
 def classify_text_pillar(text: str, subtypes: tuple) -> str:
-    """Classify logic into one of the 4 Architectural Pillars."""
+    """
+    Classify logic into one of the Architectural Pillars.
+
+    Categories:
+    - ACTION: Player-activated abilities ("once during your turn, you may...")
+    - PASSIVE: Conditional continuous effects ("as long as...", "while...")
+    - MODIFIER: Changes numeric values (retreat cost, damage, HP)
+    - GUARD: Blocks effects/conditions (status, damage, trainer cards)
+    - HOOK: Event-triggered (on_play, on_knockout, etc.)
+    """
     text_lower = text.lower()
 
     # 0. HOOKS (Triggered Events - check FIRST for "when you play" patterns)
@@ -109,7 +118,25 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'HOOK'
 
-    # 1. ACTIONS (Player-activated abilities)
+    # 1. PASSIVE (Conditional Continuous Effects)
+    # These are abilities that apply automatically while a condition is met
+    # NOT player-activated - they're always "on" when conditions are satisfied
+    # Examples: "As long as this Pokemon is in the Active Spot...", "While this Pokemon is on your Bench..."
+    passive_keywords = [
+        'as long as this pokemon',
+        'as long as this pokémon',
+        'while this pokemon',
+        'while this pokémon',
+        'as long as you have',
+        'while you have',
+        'as long as there is',
+        'while there is',
+    ]
+    for k in passive_keywords:
+        if k in text_lower:
+            return 'PASSIVE'
+
+    # 2. ACTIONS (Player-activated abilities)
     # "Once during your turn, you may..." WITHOUT a trigger is a player-activated ability
     action_keywords = [
         'once during your turn',
@@ -120,7 +147,7 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'ACTION'
 
-    # 2. MODIFIERS (Changes Numbers)
+    # 3. MODIFIERS (Changes Numbers)
     # Note: Some patterns have numbers in between (e.g., "takes 30 less damage")
     modifier_keywords = [
         'retreat cost is', 'less retreat cost', 'more retreat cost',
@@ -135,7 +162,7 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'MODIFIER'
 
-    # 3. GUARDS (Blocks Permissions/Rules)
+    # 4. GUARDS (Blocks Permissions/Rules)
     guard_keywords = [
         'prevent all damage', 'prevent all effects', "can't be affected",
         "can't be asleep", "can't be paralyzed", "can't be confused",
@@ -146,7 +173,7 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'GUARD'
 
-    # 4. Additional HOOKS (lower priority triggered events)
+    # 5. Additional HOOKS (lower priority triggered events)
     # These are checked after modifiers/guards but still represent automatic triggers
     additional_hook_keywords = [
         'whenever',
@@ -156,7 +183,7 @@ def classify_text_pillar(text: str, subtypes: tuple) -> str:
         if k in text_lower:
             return 'HOOK'
 
-    # 5. ACTIONS (Default)
+    # 6. ACTIONS (Default)
     return 'ACTION'
 
 
@@ -230,12 +257,14 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     prompt += "Every attack/ability is registered under its exact name with a `category` field:\n"
     prompt += "- **attack**: Deals damage, has energy cost, generates actions\n"
     prompt += "- **activatable**: Player-triggered ability, generates actions\n"
+    prompt += "- **passive**: Conditional continuous effect (\"as long as...\", \"while...\") - checked by engine\n"
     prompt += "- **modifier**: Continuously modifies values (retreat cost, damage, HP)\n"
     prompt += "- **guard**: Blocks effects/conditions (status, damage, trainer cards)\n"
     prompt += "- **hook**: Event-triggered (on_play, on_knockout, etc.)\n\n"
     prompt += "### Multi-Effect Abilities\n"
     prompt += "When an ability has multiple effects, use suffixed entries:\n"
     prompt += "```python\n"
+    prompt += '"Ability Name (Passive)": {"category": "passive", ...},\n'
     prompt += '"Ability Name (Modifier)": {"category": "modifier", ...},\n'
     prompt += '"Ability Name (Guard)": {"category": "guard", ...},\n'
     prompt += "```\n\n"
@@ -364,6 +393,20 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                         for step in stack_info['steps']:
                             prompt += f"  - `{step}`\n"
 
+                elif f['pillar'] == 'PASSIVE':
+                    # Passive abilities are checked by the engine, not player-activated
+                    # They need a condition checker and an effect applier
+                    condition_func = f"{card_snake}_{f['snake']}_condition"
+                    effect_func = f"{card_snake}_{f['snake']}_effect"
+                    generated_functions.extend([condition_func, effect_func])
+
+                    prompt += f"- Implement `{condition_func}(state, card)` → bool (Condition Checker)\n"
+                    prompt += f"  - Returns True when the ability's condition is met\n"
+                    prompt += f"- Implement `{effect_func}(state, card, target_card)` → bool/value (Effect Applier)\n"
+                    prompt += f"  - Called by engine to check/apply the passive effect\n"
+                    prompt += f"\n**Note:** Passive abilities are automatically checked by the engine.\n"
+                    prompt += f"The engine will call `condition` to check if effect applies, then `effect` to apply it.\n"
+
                 else: # ACTION
                     if supertype == 'Trainer':
                         gen_func = f"{card_snake}_actions"
@@ -484,6 +527,46 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                         out += f'            "category": "hook",\n'
                         out += f'            "trigger": "{trigger}",\n'
                         out += f'            "effect": {func},\n'
+                        out += f'        }},\n'
+
+                    elif f['pillar'] == 'PASSIVE':
+                        # Passive ability - conditional continuous effect
+                        # Detect the condition type from the text
+                        text_lower = f['text'].lower()
+                        if 'active spot' in text_lower or 'active pokemon' in text_lower:
+                            condition_type = "in_active_spot"
+                        elif 'bench' in text_lower:
+                            condition_type = "on_bench"
+                        else:
+                            condition_type = "custom"
+
+                        # Detect the effect type
+                        if 'no abilities' in text_lower or 'have no abilities' in text_lower:
+                            effect_type = "ability_lock"
+                        elif 'prevent' in text_lower:
+                            effect_type = "prevention"
+                        else:
+                            effect_type = "custom"
+
+                        # Detect scope (who is affected)
+                        if 'basic pokemon' in text_lower:
+                            scope = "all_basic_pokemon"
+                        elif 'your opponent' in text_lower and 'your' not in text_lower.replace("your opponent", ""):
+                            scope = "opponent_pokemon"
+                        elif 'both yours and your opponent' in text_lower:
+                            scope = "all_pokemon"
+                        else:
+                            scope = "self"
+
+                        condition_func = f"{card_snake}_{f['snake']}_condition"
+                        effect_func = f"{card_snake}_{f['snake']}_effect"
+                        out += f'        "{f["name"]}": {{\n'
+                        out += f'            "category": "passive",\n'
+                        out += f'            "condition_type": "{condition_type}",\n'
+                        out += f'            "effect_type": "{effect_type}",\n'
+                        out += f'            "scope": "{scope}",\n'
+                        out += f'            "condition": {condition_func},\n'
+                        out += f'            "effect": {effect_func},\n'
                         out += f'        }},\n'
 
                 out += f'    }},\n'

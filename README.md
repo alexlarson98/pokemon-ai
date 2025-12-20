@@ -44,30 +44,33 @@ This engine is built around a **pure functional core** with **immutable state sn
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    CARD LOGIC LAYER                         │
-│  (Modular, Extensible Card Implementations)                │
+│  (Unified Ability Schema - 5 Pillars Architecture)         │
 │                                                             │
-│  ┌─────────────────┐  ┌──────────────────┐                │
-│  │ Logic Registry  │  │  Card Library    │                │
-│  │  (Router)       │  │  (Shared Logic)  │                │
-│  │                 │  │                  │                │
-│  │ • Maps card IDs │  │ • trainers.py    │                │
-│  │   to logic      │  │ • utils.py       │                │
-│  │ • Supports      │  │                  │                │
-│  │   effects &     │  │ Atomic Actions:  │                │
-│  │   generators    │  │ • Nest Ball      │                │
-│  └─────────────────┘  │ • Poffin         │                │
-│           │            │ • Ultra Ball     │                │
-│           ▼            │ • Rare Candy     │                │
-│  ┌─────────────────┐  │ • Iono           │                │
-│  │  Set Modules    │  └──────────────────┘                │
-│  │  (sv1, sv2...)  │                                       │
-│  │                 │                                       │
-│  │ Each set maps:  │                                       │
-│  │ card_id -> {    │                                       │
-│  │   effect: fn    │                                       │
-│  │   generator: fn │                                       │
-│  │ }               │                                       │
-│  └─────────────────┘                                       │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │               MASTER_LOGIC_REGISTRY                  │  │
+│  │  Maps card_id -> { "AbilityName": { category, ... }} │  │
+│  └─────────────────────────────────────────────────────┘  │
+│                          │                                  │
+│    ┌─────────────────────┴─────────────────────┐           │
+│    ▼                                           ▼           │
+│  ┌───────────────────┐           ┌───────────────────┐    │
+│  │   Set Modules     │           │   Card Library    │    │
+│  │   (sv1..svp)      │           │   (Shared Logic)  │    │
+│  │                   │           │                   │    │
+│  │ • SV1_LOGIC       │           │ • trainers.py     │    │
+│  │ • SV3_LOGIC       │◀──imports─│   - Nest Ball     │    │
+│  │ • SVP_LOGIC       │           │   - Ultra Ball    │    │
+│  │ • ME1_LOGIC       │           │   - Rare Candy    │    │
+│  │ • ME2_LOGIC       │           │   - Iono          │    │
+│  │   ...             │           │   - Poffin        │    │
+│  └───────────────────┘           └───────────────────┘    │
+│                                                             │
+│  Categories (5 Pillars):                                   │
+│  • attack      - Damage-dealing moves                      │
+│  • activatable - Player-triggered (trainers, abilities)    │
+│  • modifier    - Passive value changes (retreat, damage)   │
+│  • guard       - Effect blockers (status immunity)         │
+│  • hook        - Event triggers (on_evolve, on_knockout)   │
 └─────────────────────────────────────────────────────────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -186,23 +189,81 @@ SETUP → MULLIGAN → MAIN → CLEANUP → [next player's turn]
 ### 2. **Card Logic Layer**
 
 #### **2a. Logic Registry** (`cards/logic_registry.py`)
-Pure routing layer that maps card IDs to implementation functions.
+Pure routing layer that maps card IDs to implementation functions using the **Unified Ability Schema**.
 
-**Structure:**
+**Unified Schema Structure:**
+Every attack and ability is registered under its **exact name** with a `category` field:
+
 ```python
 {
-    "sv1-181": {  # Nest Ball
-        "effect": nest_ball_effect,
-        "generator": nest_ball_actions
-    }
+    "sv8pt5-77": {  # Hoothoot
+        "Tackle": {
+            "category": "attack",
+            "generator": hoothoot_tackle_actions,
+            "effect": hoothoot_tackle_effect,
+        },
+        "Insomnia": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": hoothoot_insomnia_guard,
+        },
+    },
+    "me1-125": {  # Rare Candy (Trainer)
+        "Play Rare Candy": {
+            "category": "activatable",
+            "generator": rare_candy_actions,
+            "effect": rare_candy_effect,
+        },
+    },
 }
 ```
 
-**Supported Logic Types:**
-- `effect` - Execute card effect (modify state)
-- `generator` - Generate valid actions for this card
-- `ability` - Passive/triggered abilities
-- `attack` - Attack implementations
+**Categories (The 5 Pillars):**
+| Category | Description | Examples |
+|----------|-------------|----------|
+| `attack` | Damage-dealing moves with energy cost | Tackle, Burning Darkness |
+| `activatable` | Player-triggered abilities/actions | Trainer cards, activated abilities |
+| `modifier` | Continuously modifies values | Agile (retreat cost), damage buffs |
+| `guard` | Blocks effects/conditions | Insomnia (blocks Sleep), Flare Veil |
+| `hook` | Event-triggered effects | Infernal Reign (on_evolve) |
+
+**Multi-Effect Abilities:**
+When an ability has multiple effects, use suffixed entries:
+```python
+"me2-41": {  # Glaceon with Diamond Coat
+    "Diamond Coat (Damage Reduction)": {
+        "category": "modifier",
+        "modifier_type": "damage_taken",
+        "scope": "self",
+        "effect": damage_modifier_fn,
+    },
+    "Diamond Coat (Status Immunity)": {
+        "category": "guard",
+        "guard_type": "status_condition",
+        "scope": "self",
+        "effect": status_guard_fn,
+    },
+}
+```
+
+**Query Functions:**
+```python
+# Primary (Unified Schema)
+get_ability_info(card_id, ability_name) -> dict  # Full ability info with category
+get_all_effects_for_ability(card_id, ability_name) -> list  # Multi-effect support
+
+# Helpers
+get_card_logic(card_id, logic_type) -> Callable  # Generator/effect lookup
+get_card_modifier(card_id, modifier_type) -> Callable
+get_card_guard(card_id, guard_type) -> Callable
+get_card_hooks(card_id, hook_type) -> Callable
+
+# Board Scanning (Global Effects)
+scan_global_modifiers(state, modifier_type) -> List[(card, fn)]
+scan_global_guards(state, guard_type, context) -> List[(card, fn, blocking)]
+check_global_block(state, guard_type, context) -> bool
+```
 
 #### **2b. Card Library** (`cards/library/`)
 Reusable card logic implementations.
@@ -212,20 +273,43 @@ Reusable card logic implementations.
 - Rare Candy, Iono
 - Atomic action generation patterns
 
-**utils.py** - Card logic utilities:
-- `generate_search_actions()` - Deck search action generator
-- `get_deck_search_candidates()` - Knowledge Layer integration
-
 #### **2c. Set Modules** (`cards/sets/`)
-Set-specific card implementations (sv1.py, sv2.py, etc.)
+Set-specific card implementations organized by set (sv1.py, sv2.py, sv3.py, etc.)
 
-Each module exports a `{SET}_LOGIC` dictionary:
+**Available Sets:**
+- `sv1` - Scarlet & Violet Base
+- `sv2` - Paldea Evolved
+- `sv3` - Obsidian Flames
+- `sv3pt5` - 151
+- `sv4` - Paradox Rift
+- `sv4pt5` - Paldean Fates
+- `sv5` - Temporal Forces
+- `sv6` - Twilight Masquerade
+- `sv6pt5` - Shrouded Fable
+- `sv7` - Stellar Crown
+- `sv8` - Surging Sparks
+- `sv8pt5` - Prismatic Evolutions
+- `sv10` - Astral Radiance
+- `me1` - Mega Evolution A
+- `me2` - Phantasmal Flames
+- `svp` - Promo Cards
+
+Each module exports a `{SET}_LOGIC` dictionary using the unified schema:
 ```python
-SV1_LOGIC = {
-    "sv1-181": {  # Nest Ball
-        "effect": nest_ball_effect,
-        "generator": nest_ball_actions,
-    }
+SV8PT5_LOGIC = {
+    "sv8pt5-77": {  # Hoothoot
+        "Tackle": {
+            "category": "attack",
+            "generator": hoothoot_tackle_actions,
+            "effect": hoothoot_tackle_effect,
+        },
+        "Insomnia": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": hoothoot_insomnia_guard,
+        },
+    },
 }
 ```
 
@@ -619,37 +703,121 @@ print(f"Winner: {state.check_win_condition().winner_id}")
 
 ### Implementing a Custom Card
 
-1. **Create effect function** (in `cards/library/trainers.py` or set module):
+#### Example 1: Trainer Card (Activatable)
+
 ```python
-def my_card_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
-    """Execute card effect."""
+# 1. Create effect function (in cards/library/trainers.py or set module)
+def my_trainer_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """Execute trainer card effect."""
     player = state.get_player(action.player_id)
-
-    # Your card logic here
     state = draw_card(state, player.player_id)
-
     return state
-```
 
-2. **Create action generator** (optional, for complex cards):
-```python
-def my_card_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
-    """Generate valid actions for this card."""
+# 2. Create action generator
+def my_trainer_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """Generate valid actions for this trainer."""
     return [Action(
         action_type=ActionType.PLAY_ITEM,
         player_id=player.player_id,
         card_id=card.id,
-        display_label="My Card"
+        display_label="Play My Trainer"
     )]
-```
 
-3. **Register in set module** (e.g., `cards/sets/sv1.py`):
-```python
+# 3. Register in set module using unified schema
 SV1_LOGIC = {
     "sv1-123": {
-        "effect": my_card_effect,
-        "generator": my_card_actions,
-    }
+        "Play My Trainer": {
+            "category": "activatable",
+            "generator": my_trainer_actions,
+            "effect": my_trainer_effect,
+        },
+    },
+}
+```
+
+#### Example 2: Pokémon with Attack + Ability
+
+```python
+# Attack: Tackle [CC] - 30 damage
+def my_pokemon_tackle_actions(state, card, player):
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Tackle",
+        display_label="Tackle - 30 Dmg"
+    )]
+
+def my_pokemon_tackle_effect(state, card, action):
+    opponent = state.get_opponent()
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(state, card, opponent.board.active_spot, 30, "Tackle")
+        state = apply_damage(state, opponent.board.active_spot, final_damage, True, card)
+    return state
+
+# Guard: Immunity - Can't be Poisoned
+def my_pokemon_immunity_guard(state, card, condition):
+    return condition == StatusCondition.POISONED
+
+# Register with unified schema
+SV1_LOGIC = {
+    "sv1-456": {
+        "Tackle": {
+            "category": "attack",
+            "generator": my_pokemon_tackle_actions,
+            "effect": my_pokemon_tackle_effect,
+        },
+        "Immunity": {
+            "category": "guard",
+            "guard_type": "status_condition",
+            "scope": "self",
+            "effect": my_pokemon_immunity_guard,
+        },
+    },
+}
+```
+
+#### Example 3: Hook (Event-Triggered Ability)
+
+```python
+# Ability: Infernal Reign - When this Pokémon evolves, search deck for 3 Fire Energy
+def infernal_reign_hook(state, card, context):
+    """Triggered when this Pokémon evolves."""
+    player = state.get_player(card.owner_id)
+    # Search and attach logic...
+    return state
+
+# Register
+SVP_LOGIC = {
+    "svp-56": {
+        "Infernal Reign": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": infernal_reign_hook,
+        },
+    },
+}
+```
+
+#### Example 4: Modifier (Passive Value Change)
+
+```python
+# Ability: Agile - If no Energy attached, retreat cost is 0
+def agile_modifier(state, card, current_cost):
+    if not card.attached_energy:
+        return 0
+    return current_cost
+
+# Register
+ME2_LOGIC = {
+    "me2-11": {
+        "Agile": {
+            "category": "modifier",
+            "modifier_type": "retreat_cost",
+            "scope": "self",
+            "effect": agile_modifier,
+        },
+    },
 }
 ```
 
@@ -659,24 +827,32 @@ SV1_LOGIC = {
 
 ### Run All Tests
 ```bash
-# Knowledge Layer tests
-python tests/test_knowledge_layer.py
+# Run all tests with pytest
+python -m pytest tests/ -q
 
-# Atomic Action tests
-python tests/test_atomic_integration.py
+# Run specific test file
+python -m pytest tests/test_pokemon_attacks.py -v
 
-# Generator framework tests
-python tests/test_pokemon_generators.py
+# Run with coverage
+python -m pytest tests/ --cov=src
 ```
 
 ### Test Structure
 
 ```
 tests/
-├── test_knowledge_layer.py       # ISMCTS belief engine
-├── test_atomic_integration.py    # Atomic action system
-├── test_pokemon_generators.py    # Card logic framework
-└── fixtures/                     # Test decks and states
+├── test_knowledge_layer.py           # ISMCTS belief engine
+├── test_atomic_integration.py        # Atomic action system
+├── test_pokemon_attacks.py           # Attack implementations
+├── test_pokemon_generators.py        # Card logic framework
+├── test_engine_invariants.py         # Engine rule verification
+├── test_status_conditions.py         # Status condition mechanics
+├── test_retreat_mechanics.py         # Retreat cost & modifiers
+├── test_stack_mechanics.py           # Damage calculation stack
+├── test_nest_ball_comprehensive.py   # Nest Ball edge cases
+├── test_ultra_ball_comprehensive.py  # Ultra Ball edge cases
+├── test_rare_candy_comprehensive.py  # Rare Candy evolution
+└── fixtures/                         # Test decks and states
 ```
 
 ### Writing Tests
@@ -714,15 +890,23 @@ def test_nest_ball_atomic_actions():
 ✅ Atomic action system
 ✅ Knowledge Layer (ISMCTS support)
 ✅ Card registry (4000+ cards from PTCG API)
-✅ Basic trainer cards (Nest Ball, Ultra Ball, Rare Candy, Iono, Poffin)
+✅ **Unified Ability Schema** (5 Pillars: attack, activatable, modifier, guard, hook)
+✅ 16 set modules (sv1-sv10, svp, me1-me2)
+✅ Trainer cards (Nest Ball, Ultra Ball, Rare Candy, Iono, Buddy-Buddy Poffin)
+✅ Attack damage calculation with weakness/resistance
+✅ Status conditions (Poisoned, Burned, Asleep, Confused, Paralyzed)
+✅ Guard abilities (Insomnia, Flare Veil)
+✅ Modifier abilities (Agile - retreat cost reduction)
+✅ Hook abilities (Infernal Reign - on_evolve trigger)
 ✅ Human agent (console UI)
 ✅ Random agent (baseline)
+✅ 1600+ tests passing
 
 ### In Progress
-🚧 Attack damage calculation
-🚧 Status conditions
-🚧 Abilities framework
-🚧 More trainer cards
+🚧 More Pokémon implementations
+🚧 Stadium cards
+🚧 Tool cards
+🚧 Special Energy cards
 
 ### Planned Features
 📋 MCTS agent implementation
