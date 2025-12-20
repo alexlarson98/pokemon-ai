@@ -1,0 +1,59 @@
+# Fezandipiti ex Implementation
+
+Implement this card using the **4 Pillars Architecture** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### 4 Pillars Architecture
+- **ACTIONS**: Generator functions return legal actions; Effect functions apply the action
+- **MODIFIERS**: Functions that modify numeric values (damage, HP, retreat cost)
+- **GUARDS**: Functions that block or prevent actions/effects
+- **HOOKS**: Functions triggered by game events (on_play, on_knockout, etc.)
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- **SearchAndAttachState**: For abilities that search and attach energy (use `InterruptPhase.SELECT_COUNT`)
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"actions": {"play": ...}`.
+
+**Card IDs:** sv6pt5-38, sv6pt5-84, sv6pt5-92 | **Type:** Pokemon (Basic, ex) | **HP:** 210
+
+### Feature: Flip the Script (ACTION)
+_Once during your turn, if any of your Pokemon were Knocked Out during your opponent's last turn, you may draw 3 cards. You can't use more than 1 Flip the Script Ability each turn._
+
+- Implement `fezandipiti_ex_flip_the_script_actions(state, card, player)` (Generator)
+- Implement `fezandipiti_ex_flip_the_script_effect(state, card, action)` (Effect)
+  - **Requirement:** Check usage flags for Once Per Turn.
+
+### Attack: Cruel Arrow [CCC] 
+_This attack does 100 damage to 1 of your opponent's Pokemon. (Don't apply Weakness and Resistance for Benched Pokemon.)_
+- Implement `fezandipiti_ex_cruel_arrow_actions` and `fezandipiti_ex_cruel_arrow_effect`.
+
+**Stack Architecture Required** (Pattern: `SELECT_TARGET`)
+Resolution Steps:
+  - `SelectFromZoneStep (target selection)`
+
+### Registry (`sv6pt5.py`)
+```python
+SV6PT5_LOGIC = {
+    "sv6pt5-38": {
+        "Flip the Script": {"generator": fezandipiti_ex_flip_the_script_actions, "effect": fezandipiti_ex_flip_the_script_effect},
+        "Cruel Arrow": {"generator": fezandipiti_ex_cruel_arrow_actions, "effect": fezandipiti_ex_cruel_arrow_effect},
+    },
+    "sv6pt5-84": {
+        "Flip the Script": {"generator": fezandipiti_ex_flip_the_script_actions, "effect": fezandipiti_ex_flip_the_script_effect},
+        "Cruel Arrow": {"generator": fezandipiti_ex_cruel_arrow_actions, "effect": fezandipiti_ex_cruel_arrow_effect},
+    },
+    "sv6pt5-92": {
+        "Flip the Script": {"generator": fezandipiti_ex_flip_the_script_actions, "effect": fezandipiti_ex_flip_the_script_effect},
+        "Cruel Arrow": {"generator": fezandipiti_ex_cruel_arrow_actions, "effect": fezandipiti_ex_cruel_arrow_effect},
+    },
+}
+```
+

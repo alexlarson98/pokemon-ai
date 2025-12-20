@@ -1,0 +1,144 @@
+# Noctowl Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** svp-141, sv7-115, sv8pt5-78 | **Type:** Pokemon (Stage 1) | **HP:** 100
+
+### Feature: Jewel Seeker (HOOK)
+_Once during your turn, when you play this Pokemon from your hand to evolve 1 of your Pokemon, if you have any Tera Pokemon in play, you may search your deck for up to 2 Trainer cards, reveal them, and put them into your hand. Then, shuffle your deck._
+
+- Implement `noctowl_jewel_seeker_hook(state, card, context)`
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Speed Wing [CC] 60
+- Implement `noctowl_speed_wing_actions` and `noctowl_speed_wing_effect`.
+
+### Registry (`svp.py`)
+```python
+SVP_LOGIC = {
+    "svp-141": {
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_play",
+            "effect": noctowl_jewel_seeker_hook,
+        },
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv7.py`)
+```python
+from cards.sets.svp import (
+    noctowl_jewel_seeker_hook,
+    noctowl_speed_wing_actions,
+    noctowl_speed_wing_effect,
+)
+
+SV7_LOGIC = {
+    "sv7-115": {
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_play",
+            "effect": noctowl_jewel_seeker_hook,
+        },
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+    },
+}
+```
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.svp import (
+    noctowl_jewel_seeker_hook,
+    noctowl_speed_wing_actions,
+    noctowl_speed_wing_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-78": {
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_play",
+            "effect": noctowl_jewel_seeker_hook,
+        },
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv5-127 | **Type:** Pokemon (Stage 1) | **HP:** 110
+
+### Attack: Talon Hunt [CC] 70
+_You may search your deck for up to 2 cards and put them into your hand. Then, shuffle your deck._
+- Implement `noctowl_talon_hunt_actions` and `noctowl_talon_hunt_effect`.
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Registry (`sv5.py`)
+```python
+SV5_LOGIC = {
+    "sv5-127": {
+        "Talon Hunt": {
+            "category": "attack",
+            "generator": noctowl_talon_hunt_actions,
+            "effect": noctowl_talon_hunt_effect,
+        },
+    },
+}
+```
+

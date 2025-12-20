@@ -1,0 +1,114 @@
+# Dusclops Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv6pt5-19, sv6pt5-69, sv8pt5-36 | **Type:** Pokemon (Stage 1) | **HP:** 90
+
+### Feature: Cursed Blast (ACTION)
+_Once during your turn, you may put 5 damage counters on 1 of your opponent's Pokemon. If you use this Ability, this Pokemon is Knocked Out._
+
+- Implement `dusclops_cursed_blast_actions(state, card, player)` (Generator)
+- Implement `dusclops_cursed_blast_effect(state, card, action)` (Effect)
+  - **Requirement:** Check usage flags for Once Per Turn.
+
+**Stack Architecture Required** (Pattern: `SELECT_TARGET`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (target selection)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Will-O-Wisp [PP] 50
+- Implement `dusclops_will_o_wisp_actions` and `dusclops_will_o_wisp_effect`.
+
+### Registry (`sv6pt5.py`)
+```python
+SV6PT5_LOGIC = {
+    "sv6pt5-19": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
+        },
+    },
+    "sv6pt5-69": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.sv6pt5 import (
+    dusclops_cursed_blast_actions,
+    dusclops_cursed_blast_effect,
+    dusclops_will_o_wisp_actions,
+    dusclops_will_o_wisp_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-36": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
+        },
+    },
+}
+```
+

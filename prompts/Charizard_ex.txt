@@ -1,0 +1,214 @@
+# Charizard ex Implementation
+
+Implement this card using the **4 Pillars Architecture** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### 4 Pillars Architecture
+- **ACTIONS**: Generator functions return legal actions; Effect functions apply the action
+- **MODIFIERS**: Functions that modify numeric values (damage, HP, retreat cost)
+- **GUARDS**: Functions that block or prevent actions/effects
+- **HOOKS**: Functions triggered by game events (on_play, on_knockout, etc.)
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- **SearchAndAttachState**: For abilities that search and attach energy (use `InterruptPhase.SELECT_COUNT`)
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"actions": {"play": ...}`.
+
+## Version 1
+
+**Card IDs:** svp-56, sv4pt5-54, sv4pt5-234 | **Type:** Pokemon (Stage 2, Tera, ex) | **HP:** 330
+
+### Feature: Infernal Reign (HOOK)
+_When you play this Pokemon from your hand to evolve 1 of your Pokemon during your turn, you may search your deck for up to 3 Basic Fire Energy cards and attach them to your Pokemon in any way you like. Then, shuffle your deck._
+
+- Implement `charizard_ex_infernal_reign_hook(state, card, context)`
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Burning Darkness [FF] 180+
+_This attack does 30 more damage for each Prize card your opponent has taken._
+- Implement `charizard_ex_burning_darkness_actions` and `charizard_ex_burning_darkness_effect`.
+
+### Registry (`svp.py`)
+```python
+SVP_LOGIC = {
+    "svp-56": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv4pt5.py`)
+```python
+from cards.sets.svp import (
+    charizard_ex_infernal_reign_hook,
+    charizard_ex_burning_darkness_actions,
+    charizard_ex_burning_darkness_effect,
+)
+
+SV4PT5_LOGIC = {
+    "sv4pt5-54": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv4pt5-234": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** svp-74 | **Type:** Pokemon (Stage 2, Tera, ex) | **HP:** 330
+
+### Feature: Infernal Reign (HOOK)
+_When you play this Pokemon from your hand to evolve 1 of your Pokemon during your turn, you may search your deck for up to 3 Basic Fire Energy cards and attach them to your Pokemon in any way you like. Then, shuffle your deck._
+
+- Implement `charizard_ex_infernal_reign_hook(state, card, context)`
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Burning Darkness [FF] 180+
+_This attack does 30 more damage for each Prize card your opponent has taken._
+- Implement `charizard_ex_burning_darkness_actions` and `charizard_ex_burning_darkness_effect`.
+
+### Registry (`svp.py`)
+```python
+SVP_LOGIC = {
+    "svp-74": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+}
+```
+
+## Version 3
+
+**Card IDs:** svp-161, sv3pt5-6, sv3pt5-183, sv3pt5-199 | **Type:** Pokemon (Stage 2, ex) | **HP:** 330
+
+### Attack: Brave Wing [F] 60+
+_If this Pokemon has any damage counters on it, this attack does 100 more damage._
+- Implement `charizard_ex_brave_wing_actions` and `charizard_ex_brave_wing_effect`.
+
+### Attack: Explosive Vortex [FFFF] 330
+_Discard 3 Energy from this Pokemon._
+- Implement `charizard_ex_explosive_vortex_actions` and `charizard_ex_explosive_vortex_effect`.
+
+**Stack Architecture Required** (Pattern: `DISCARD_COST`)
+Resolution Steps:
+  - `SelectFromZoneStep (DISCARD_COST)`
+
+### Registry (`svp.py`)
+```python
+SVP_LOGIC = {
+    "svp-161": {
+        "Brave Wing": {"generator": charizard_ex_brave_wing_actions, "effect": charizard_ex_brave_wing_effect},
+        "Explosive Vortex": {"generator": charizard_ex_explosive_vortex_actions, "effect": charizard_ex_explosive_vortex_effect},
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv3pt5.py`)
+```python
+from cards.sets.svp import (
+    charizard_ex_brave_wing_actions,
+    charizard_ex_brave_wing_effect,
+    charizard_ex_explosive_vortex_actions,
+    charizard_ex_explosive_vortex_effect,
+)
+
+SV3PT5_LOGIC = {
+    "sv3pt5-6": {
+        "Brave Wing": {"generator": charizard_ex_brave_wing_actions, "effect": charizard_ex_brave_wing_effect},
+        "Explosive Vortex": {"generator": charizard_ex_explosive_vortex_actions, "effect": charizard_ex_explosive_vortex_effect},
+    },
+    "sv3pt5-183": {
+        "Brave Wing": {"generator": charizard_ex_brave_wing_actions, "effect": charizard_ex_brave_wing_effect},
+        "Explosive Vortex": {"generator": charizard_ex_explosive_vortex_actions, "effect": charizard_ex_explosive_vortex_effect},
+    },
+    "sv3pt5-199": {
+        "Brave Wing": {"generator": charizard_ex_brave_wing_actions, "effect": charizard_ex_brave_wing_effect},
+        "Explosive Vortex": {"generator": charizard_ex_explosive_vortex_actions, "effect": charizard_ex_explosive_vortex_effect},
+    },
+}
+```
+
+## Version 4
+
+**Card IDs:** sv3-125, sv3-215, sv3-223, sv3-228 | **Type:** Pokemon (Stage 2, ex, Tera) | **HP:** 330
+
+### Feature: Infernal Reign (HOOK)
+_When you play this Pokemon from your hand to evolve 1 of your Pokemon during your turn, you may search your deck for up to 3 Basic Fire Energy cards and attach them to your Pokemon in any way you like. Then, shuffle your deck._
+
+- Implement `charizard_ex_infernal_reign_hook(state, card, context)`
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Burning Darkness [FF] 180+
+_This attack does 30 more damage for each Prize card your opponent has taken._
+- Implement `charizard_ex_burning_darkness_actions` and `charizard_ex_burning_darkness_effect`.
+
+### Registry (`sv3.py`)
+```python
+SV3_LOGIC = {
+    "sv3-125": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-215": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-223": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+    "sv3-228": {
+        "Burning Darkness": {"generator": charizard_ex_burning_darkness_actions, "effect": charizard_ex_burning_darkness_effect},
+        "hooks": {
+            "on_play_pokemon": charizard_ex_infernal_reign_hook,
+        },
+    },
+}
+```
+

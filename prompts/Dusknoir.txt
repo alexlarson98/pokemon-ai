@@ -1,0 +1,115 @@
+# Dusknoir Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv6pt5-20, sv6pt5-70, sv8pt5-37 | **Type:** Pokemon (Stage 2) | **HP:** 160
+
+### Feature: Cursed Blast (ACTION)
+_Once during your turn, you may put 13 damage counters on 1 of your opponent's Pokemon. If you use this Ability, this Pokemon is Knocked Out._
+
+- Implement `dusknoir_cursed_blast_actions(state, card, player)` (Generator)
+- Implement `dusknoir_cursed_blast_effect(state, card, action)` (Effect)
+  - **Requirement:** Check usage flags for Once Per Turn.
+
+**Stack Architecture Required** (Pattern: `SELECT_TARGET`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (target selection)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (target selection)`
+
+### Attack: Shadow Bind [PPC] 150
+_During your opponent's next turn, the Defending Pokemon can't retreat._
+- Implement `dusknoir_shadow_bind_actions` and `dusknoir_shadow_bind_effect`.
+
+### Registry (`sv6pt5.py`)
+```python
+SV6PT5_LOGIC = {
+    "sv6pt5-20": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusknoir_cursed_blast_actions,
+            "effect": dusknoir_cursed_blast_effect,
+        },
+        "Shadow Bind": {
+            "category": "attack",
+            "generator": dusknoir_shadow_bind_actions,
+            "effect": dusknoir_shadow_bind_effect,
+        },
+    },
+    "sv6pt5-70": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusknoir_cursed_blast_actions,
+            "effect": dusknoir_cursed_blast_effect,
+        },
+        "Shadow Bind": {
+            "category": "attack",
+            "generator": dusknoir_shadow_bind_actions,
+            "effect": dusknoir_shadow_bind_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.sv6pt5 import (
+    dusknoir_cursed_blast_actions,
+    dusknoir_cursed_blast_effect,
+    dusknoir_shadow_bind_actions,
+    dusknoir_shadow_bind_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-37": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusknoir_cursed_blast_actions,
+            "effect": dusknoir_cursed_blast_effect,
+        },
+        "Shadow Bind": {
+            "category": "attack",
+            "generator": dusknoir_shadow_bind_actions,
+            "effect": dusknoir_shadow_bind_effect,
+        },
+    },
+}
+```
+

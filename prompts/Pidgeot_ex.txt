@@ -1,0 +1,130 @@
+# Pidgeot ex Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv3-164, sv3-217, sv3-225, sv4pt5-221 | **Type:** Pokemon (Stage 2, ex) | **HP:** 280
+
+### Feature: Quick Search (ACTION)
+_Once during your turn, you may search your deck for a card and put it into your hand. Then, shuffle your deck. You can't use more than 1 Quick Search Ability each turn._
+
+- Implement `pidgeot_ex_quick_search_actions(state, card, player)` (Generator)
+- Implement `pidgeot_ex_quick_search_effect(state, card, action)` (Effect)
+  - **Requirement:** Check usage flags for Once Per Turn.
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Attack: Blustery Wind [CC] 120
+_You may discard a Stadium in play._
+- Implement `pidgeot_ex_blustery_wind_actions` and `pidgeot_ex_blustery_wind_effect`.
+- If a stadium is in play, give the player the option to discard it, otherwise auto-select
+
+### Registry (`sv3.py`)
+```python
+SV3_LOGIC = {
+    "sv3-164": {
+        "Quick Search": {
+            "category": "activatable",
+            "generator": pidgeot_ex_quick_search_actions,
+            "effect": pidgeot_ex_quick_search_effect,
+        },
+        "Blustery Wind": {
+            "category": "attack",
+            "generator": pidgeot_ex_blustery_wind_actions,
+            "effect": pidgeot_ex_blustery_wind_effect,
+        },
+    },
+    "sv3-217": {
+        "Quick Search": {
+            "category": "activatable",
+            "generator": pidgeot_ex_quick_search_actions,
+            "effect": pidgeot_ex_quick_search_effect,
+        },
+        "Blustery Wind": {
+            "category": "attack",
+            "generator": pidgeot_ex_blustery_wind_actions,
+            "effect": pidgeot_ex_blustery_wind_effect,
+        },
+    },
+    "sv3-225": {
+        "Quick Search": {
+            "category": "activatable",
+            "generator": pidgeot_ex_quick_search_actions,
+            "effect": pidgeot_ex_quick_search_effect,
+        },
+        "Blustery Wind": {
+            "category": "attack",
+            "generator": pidgeot_ex_blustery_wind_actions,
+            "effect": pidgeot_ex_blustery_wind_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv4pt5.py`)
+```python
+from cards.sets.sv3 import (
+    pidgeot_ex_quick_search_actions,
+    pidgeot_ex_quick_search_effect,
+    pidgeot_ex_blustery_wind_actions,
+    pidgeot_ex_blustery_wind_effect,
+)
+
+SV4PT5_LOGIC = {
+    "sv4pt5-221": {
+        "Quick Search": {
+            "category": "activatable",
+            "generator": pidgeot_ex_quick_search_actions,
+            "effect": pidgeot_ex_quick_search_effect,
+        },
+        "Blustery Wind": {
+            "category": "attack",
+            "generator": pidgeot_ex_blustery_wind_actions,
+            "effect": pidgeot_ex_blustery_wind_effect,
+        },
+    },
+}
+```
+
