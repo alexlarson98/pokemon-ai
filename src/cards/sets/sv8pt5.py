@@ -15,6 +15,10 @@ from .sv6pt5 import (
     duskull_come_and_get_you_effect,
     duskull_mumble_actions,
     duskull_mumble_effect,
+    dusclops_cursed_blast_actions,
+    dusclops_cursed_blast_effect,
+    dusclops_will_o_wisp_actions,
+    dusclops_will_o_wisp_effect,
 )
 from cards.library.trainers import (
     professors_research_actions,
@@ -125,6 +129,20 @@ SV8PT5_LOGIC = {
             "category": "attack",
             "generator": duskull_mumble_actions,
             "effect": duskull_mumble_effect,
+        },
+    },
+
+    # Dusclops - Reprint from sv6pt5
+    "sv8pt5-36": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
         },
     },
 

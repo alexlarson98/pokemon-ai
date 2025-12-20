@@ -6,7 +6,7 @@ Set Code: SFA (sv6pt5)
 from typing import List
 from itertools import combinations
 from models import GameState, CardInstance, Action, ActionType, PlayerState, SelectFromZoneStep, ZoneType, SelectionPurpose
-from actions import apply_damage, calculate_damage
+from actions import apply_damage, calculate_damage, place_damage_counters, force_knockout
 from cards.factory import get_card_definition
 
 
@@ -385,6 +385,171 @@ def duskull_mumble_effect(state: GameState, card: CardInstance, action: Action) 
 
 
 # ============================================================================
+# DUSCLOPS - CURSED BLAST & WILL-O-WISP
+# ============================================================================
+
+def dusclops_cursed_blast_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Dusclops's "Cursed Blast" ability.
+
+    Ability: Cursed Blast
+    Once during your turn, you may put 5 damage counters on 1 of your opponent's
+    Pokemon. If you use this Ability, this Pokemon is Knocked Out.
+
+    Conditions:
+    1. Must have valid targets (opponent has Pokemon on board)
+
+    Args:
+        state: Current game state
+        card: Dusclops CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List of ability actions with target options
+    """
+
+    opponent = state.get_opponent()
+    actions = []
+
+    # Collect all opponent Pokemon that can be targeted
+    targets = []
+
+    if opponent.board.active_spot:
+        targets.append(('active', opponent.board.active_spot))
+
+    for bench_pokemon in opponent.board.bench:
+        targets.append(('bench', bench_pokemon))
+
+    # No targets = can't use ability
+    if not targets:
+        return []
+
+    # Generate action for each target
+    for location, target in targets:
+        card_def = get_card_definition(target)
+        target_name = card_def.name if card_def else target.card_id
+
+        if location == 'active':
+            label = f"Cursed Blast -> {target_name} (Active) - 5 damage counters (KO self)"
+        else:
+            label = f"Cursed Blast -> {target_name} (Bench) - 5 damage counters (KO self)"
+
+        actions.append(Action(
+            action_type=ActionType.USE_ABILITY,
+            player_id=player.player_id,
+            card_id=card.id,
+            ability_name="Cursed Blast",
+            target_id=target.id,
+            parameters={'target_location': location},
+            display_label=label
+        ))
+
+    return actions
+
+
+def dusclops_cursed_blast_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Dusclops's "Cursed Blast" ability effect.
+
+    Put 5 damage counters on target opponent's Pokemon, then KO self.
+
+    Args:
+        state: Current game state
+        card: Dusclops CardInstance
+        action: Ability action with target_id
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+    target_id = action.target_id
+
+    # Find target Pokemon
+    target = None
+    if opponent.board.active_spot and opponent.board.active_spot.id == target_id:
+        target = opponent.board.active_spot
+    else:
+        for bench_pokemon in opponent.board.bench:
+            if bench_pokemon.id == target_id:
+                target = bench_pokemon
+                break
+
+    if target:
+        # Place 5 damage counters on target (50 damage, but as counters - no W/R)
+        state = place_damage_counters(
+            state=state,
+            target=target,
+            amount=5
+        )
+
+    # KO self (Dusclops)
+    state = force_knockout(state, card.id)
+
+    return state
+
+
+def dusclops_will_o_wisp_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Dusclops's "Will-O-Wisp" attack.
+
+    Attack: Will-O-Wisp [PP]
+    50 damage. No additional effects.
+
+    Args:
+        state: Current game state
+        card: Dusclops CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Will-O-Wisp",
+        display_label="Will-O-Wisp - 50 Dmg"
+    )]
+
+
+def dusclops_will_o_wisp_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Dusclops's "Will-O-Wisp" attack effect.
+
+    Deals 50 damage to opponent's Active Pokémon.
+
+    Args:
+        state: Current game state
+        card: Dusclops CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 50 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=50,
+            attack_name="Will-O-Wisp"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+# ============================================================================
 # SV6PT5 LOGIC REGISTRY
 # ============================================================================
 
@@ -449,6 +614,32 @@ SV6PT5_LOGIC = {
             "category": "attack",
             "generator": duskull_mumble_actions,
             "effect": duskull_mumble_effect,
+        },
+    },
+
+    # Dusclops - Cursed Blast & Will-O-Wisp
+    "sv6pt5-19": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
+        },
+    },
+    "sv6pt5-69": {
+        "Cursed Blast": {
+            "category": "activatable",
+            "generator": dusclops_cursed_blast_actions,
+            "effect": dusclops_cursed_blast_effect,
+        },
+        "Will-O-Wisp": {
+            "category": "attack",
+            "generator": dusclops_will_o_wisp_actions,
+            "effect": dusclops_will_o_wisp_effect,
         },
     },
 }

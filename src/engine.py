@@ -2222,6 +2222,31 @@ class PokemonEngine:
             # No custom effect - mark as used for once-per-turn abilities
             pokemon.abilities_used_this_turn.add(ability_name)
 
+        # Check for knockouts after ability effect (e.g., Cursed Blast self-KO, damage counter placement)
+        # This mirrors the KO check in _apply_attack but handles ability-caused KOs
+        from cards.factory import get_max_hp
+
+        # Check all Pokemon on board for KOs (abilities can affect any Pokemon)
+        for pid in [0, 1]:
+            check_player = state.get_player(pid)
+            opponent_player = state.get_player(1 - pid)
+
+            # Check active spot
+            if check_player.board.active_spot:
+                active = check_player.board.active_spot
+                max_hp = get_max_hp(active)
+                if active.is_knocked_out(max_hp):
+                    # For ability KOs: opponent of the KO'd Pokemon gets the prize
+                    # No killer for ability-caused KOs (affects prize calculation)
+                    state = self._handle_knockout(state, active, opponent_player, killer=None)
+
+            # Check bench (iterate over copy since we may modify during iteration)
+            for bench_pokemon in check_player.board.bench[:]:
+                max_hp = get_max_hp(bench_pokemon)
+                if bench_pokemon.is_knocked_out(max_hp):
+                    # Benched Pokemon KO'd - opponent gets prize
+                    state = self._handle_knockout(state, bench_pokemon, opponent_player, killer=None)
+
         return state
 
     def _apply_retreat(self, state: GameState, action: Action) -> GameState:
