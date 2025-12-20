@@ -9,11 +9,12 @@ For reprints, this module imports logic from the set where the card was first re
 from typing import List, Optional
 from models import (
     GameState, CardInstance, Action, ActionType, PlayerState,
-    EnergyType, Subtype, SearchAndAttachState, InterruptPhase
+    EnergyType, Subtype, SearchAndAttachState, InterruptPhase,
+    SearchDeckStep, ZoneType, SelectionPurpose
 )
 from actions import apply_damage, calculate_damage, shuffle_deck
-from cards.library.trainers import iono_actions, iono_effect
 from cards.factory import get_card_definition
+from cards.library.trainers import iono_actions, iono_effect
 from cards.base import EnergyCard
 from .sv2 import chien_pao_ex_hail_blade_actions, chien_pao_ex_hail_blade_effect
 
@@ -497,6 +498,136 @@ def charizard_ex_explosive_vortex_effect(state: GameState, card: CardInstance, a
 
 
 # ============================================================================
+# NOCTOWL - VERSION 1: JEWEL SEEKER HOOK + SPEED WING (svp-141, sv7-115, sv8pt5-78)
+# ============================================================================
+
+def noctowl_jewel_seeker_hook(state: GameState, card: CardInstance, context: dict) -> GameState:
+    """
+    Hook for Noctowl's "Jewel Seeker" ability.
+
+    Ability: Jewel Seeker
+    When you play this Pokémon from your hand to evolve 1 of your Pokémon during
+    your turn, if you have any Tera Pokémon in play, you may search your deck
+    for up to 2 Trainer cards, reveal them, and put them into your hand.
+    Then, shuffle your deck.
+
+    This hook is triggered when Noctowl evolves from Hoothoot.
+
+    Args:
+        state: Current game state
+        card: Noctowl CardInstance (the evolved Pokémon)
+        context: Hook context containing:
+            - 'evolved_pokemon': The Noctowl that just evolved
+            - 'previous_stage': The Hoothoot that was evolved from
+            - 'player_id': The player who evolved
+
+    Returns:
+        Modified GameState with SearchDeckStep pushed if Tera condition is met
+    """
+    # Only trigger if this is the card that just evolved
+    evolved_pokemon = context.get('evolved_pokemon')
+    if evolved_pokemon is None or evolved_pokemon.id != card.id:
+        return state
+
+    player_id = context.get('player_id')
+    player = state.get_player(player_id)
+
+    if not player or player.deck.is_empty():
+        return state
+
+    # Check if player has any Tera Pokémon in play
+    has_tera = False
+    for pokemon in player.board.get_all_pokemon():
+        card_def = get_card_definition(pokemon)
+        if card_def and Subtype.TERA in card_def.subtypes:
+            has_tera = True
+            break
+
+    if not has_tera:
+        # No Tera Pokémon in play, ability cannot be used
+        return state
+
+    # Push SearchDeckStep for up to 2 Trainer cards
+    search_step = SearchDeckStep(
+        source_card_id=card.id,
+        source_card_name="Jewel Seeker",
+        player_id=player_id,
+        purpose=SelectionPurpose.SEARCH_TARGET,
+        count=2,
+        min_count=0,
+        destination=ZoneType.HAND,
+        filter_criteria={
+            'supertype': 'Trainer'
+        },
+        shuffle_after=True
+    )
+
+    state.push_step(search_step)
+    return state
+
+
+def noctowl_speed_wing_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Noctowl's "Speed Wing" attack.
+
+    Attack: Speed Wing [CC]
+    60 damage. No additional effects.
+
+    Args:
+        state: Current game state
+        card: Noctowl CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Speed Wing",
+        display_label="Speed Wing - 60 Dmg"
+    )]
+
+
+def noctowl_speed_wing_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Noctowl's "Speed Wing" attack effect.
+
+    Deals 60 damage to opponent's Active Pokémon.
+
+    Args:
+        state: Current game state
+        card: Noctowl CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    opponent = state.get_opponent()
+
+    # Deal 60 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=60,
+            attack_name="Speed Wing"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+# ============================================================================
 # SVP LOGIC REGISTRY
 # ============================================================================
 
@@ -565,6 +696,20 @@ SVP_LOGIC = {
             "category": "attack",
             "generator": charizard_ex_explosive_vortex_actions,
             "effect": charizard_ex_explosive_vortex_effect,
+        },
+    },
+
+    # Noctowl - Version 1: Jewel Seeker + Speed Wing
+    "svp-141": {
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": noctowl_jewel_seeker_hook,
         },
     },
 

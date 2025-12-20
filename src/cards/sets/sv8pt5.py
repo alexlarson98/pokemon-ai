@@ -24,6 +24,11 @@ from .sv6pt5 import (
     dusknoir_shadow_bind_actions,
     dusknoir_shadow_bind_effect,
 )
+from .svp import (
+    noctowl_jewel_seeker_hook,
+    noctowl_speed_wing_actions,
+    noctowl_speed_wing_effect,
+)
 from cards.library.trainers import (
     professors_research_actions,
     professors_research_effect,
@@ -176,6 +181,20 @@ SV8PT5_LOGIC = {
             "guard_type": "status_condition",
             "scope": "self",
             "effect": hoothoot_insomnia_guard,
+        },
+    },
+
+    # Noctowl - Version 1 (Reprint from svp-141)
+    "sv8pt5-78": {
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": noctowl_jewel_seeker_hook,
         },
     },
 

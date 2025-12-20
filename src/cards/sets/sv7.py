@@ -7,6 +7,13 @@ from typing import List
 from models import GameState, CardInstance, Action, ActionType, PlayerState
 from actions import apply_damage, calculate_damage, coin_flip_multiple
 
+# Import Noctowl Version 1 from svp (reprint)
+from .svp import (
+    noctowl_jewel_seeker_hook,
+    noctowl_speed_wing_actions,
+    noctowl_speed_wing_effect,
+)
+
 
 # ============================================================================
 # HOOTHOOT - VERSION 2: TRIPLE STAB (sv7-114)
@@ -91,6 +98,20 @@ SV7_LOGIC = {
             "category": "attack",
             "generator": hoothoot_triple_stab_actions,
             "effect": hoothoot_triple_stab_effect,
+        },
+    },
+
+    # Noctowl - Version 1 (Reprint from svp-141)
+    "sv7-115": {
+        "Speed Wing": {
+            "category": "attack",
+            "generator": noctowl_speed_wing_actions,
+            "effect": noctowl_speed_wing_effect,
+        },
+        "Jewel Seeker": {
+            "category": "hook",
+            "trigger": "on_evolve",
+            "effect": noctowl_jewel_seeker_hook,
         },
     },
 }
