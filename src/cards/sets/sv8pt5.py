@@ -42,6 +42,8 @@ from .sv7 import (
 from cards.library.trainers import (
     professors_research_actions,
     professors_research_effect,
+    briar_actions,
+    briar_effect,
 )
 
 
@@ -289,6 +291,15 @@ SV8PT5_LOGIC = {
             "category": "attack",
             "generator": terapagos_ex_crown_opal_actions,
             "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+
+    # Briar - Supporter (reprint from sv7)
+    "sv8pt5-100": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
         },
     },
 }

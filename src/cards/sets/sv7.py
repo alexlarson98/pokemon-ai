@@ -9,6 +9,7 @@ from models import (
     SearchDeckStep, ZoneType, SelectionPurpose
 )
 from actions import apply_damage, calculate_damage, coin_flip_multiple
+from cards.library.trainers import briar_actions, briar_effect
 
 # Import Noctowl Version 1 from svp (reprint)
 from .svp import (
@@ -347,6 +348,29 @@ SV7_LOGIC = {
             "category": "attack",
             "generator": terapagos_ex_crown_opal_actions,
             "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+
+    # Briar - Supporter
+    "sv7-132": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+    "sv7-163": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+    "sv7-171": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
         },
     },
 }

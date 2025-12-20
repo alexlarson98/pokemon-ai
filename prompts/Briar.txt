@@ -1,0 +1,89 @@
+# Briar Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv7-132, sv7-163, sv7-171, sv8pt5-100 | **Type:** Trainer (Supporter) | **HP:** N/A
+
+### Feature: play (ACTION)
+_You can use this card only if your opponent has exactly 2 Prize cards remaining.    During this turn, if your opponent's Active Pokemon is Knocked Out by damage from an attack used by your Tera Pokemon, take 1 more Prize card. You may play only 1 Supporter card during your turn._
+
+- Implement `briar_actions(state, card, player)` (Generator)
+- Implement `briar_effect(state, card, action)` (Effect)
+
+### Registry (`sv7.py`)
+```python
+SV7_LOGIC = {
+    "sv7-132": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+    "sv7-163": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+    "sv7-171": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.sv7 import (
+    briar_actions,
+    briar_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-100": {
+        "Play Briar": {
+            "category": "activatable",
+            "generator": briar_actions,
+            "effect": briar_effect,
+        },
+    },
+}
+```
+

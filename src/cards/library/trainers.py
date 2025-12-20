@@ -11,10 +11,10 @@ Action generators follow the signature:
     def card_name_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]
 """
 
-from typing import List
+from typing import List, Optional
 from models import (
     GameState, CardInstance, Action, ActionType, Subtype, PlayerState,
-    SearchDeckStep, ZoneType, SelectionPurpose
+    SearchDeckStep, ZoneType, SelectionPurpose, EffectSource
 )
 from cards.factory import get_card_definition
 from cards.base import PokemonCard
@@ -475,5 +475,129 @@ def dawn_effect(state: GameState, card: CardInstance, action: Action) -> GameSta
         reveal_cards=True
     )
     state.push_step(search_basic_step)
+
+    return state
+
+
+# ============================================================================
+# BRIAR - SUPPORTER (sv7-132, sv7-163, sv7-171, sv8pt5-100)
+# ============================================================================
+
+def briar_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Briar Supporter card.
+
+    Briar can only be played if your opponent has exactly 2 Prize cards remaining.
+    During this turn, if your opponent's Active Pokemon is Knocked Out by damage
+    from an attack used by your Tera Pokemon, take 1 more Prize card.
+
+    Args:
+        state: Current game state
+        card: Briar CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List with play action if conditions are met, empty list otherwise
+    """
+    # Check if supporter already played this turn
+    if player.supporter_played_this_turn:
+        return []
+
+    # Check if opponent has exactly 2 Prize cards remaining
+    opponent = state.get_opponent()
+    if len(opponent.prizes.cards) != 2:
+        return []
+
+    return [Action(
+        action_type=ActionType.PLAY_SUPPORTER,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Play Briar (+1 Prize if Tera KOs Active)"
+    )]
+
+
+def _briar_prize_condition(
+    killer: Optional[CardInstance],
+    victim: CardInstance,
+    state: GameState
+) -> bool:
+    """
+    Condition check for Briar's prize modifier effect.
+
+    Returns True if:
+    1. There is a killer (KO was from an attack, not damage counters)
+    2. The killer is a Tera Pokemon
+    3. The victim was the opponent's Active Pokemon
+
+    Args:
+        killer: Pokemon that scored the KO
+        victim: Pokemon that was knocked out
+        state: Current game state
+
+    Returns:
+        True if Briar's +1 prize should apply
+    """
+    from cards.registry import create_card
+
+    # Must have a killer (attack damage, not effect damage counters)
+    if killer is None:
+        return False
+
+    # Check if killer is a Tera Pokemon
+    killer_def = create_card(killer.card_id)
+    if not killer_def:
+        return False
+
+    if not hasattr(killer_def, 'subtypes') or Subtype.TERA not in killer_def.subtypes:
+        return False
+
+    # Check if victim was the opponent's Active Pokemon
+    # The victim should belong to the opponent of the killer's owner
+    victim_owner = state.get_player(victim.owner_id)
+    if victim_owner.board.active_spot and victim_owner.board.active_spot.id == victim.id:
+        # Victim was in Active Spot - Briar applies
+        return True
+
+    return False
+
+
+def briar_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Briar Supporter effect.
+
+    Adds a PRIZE_COUNT_MODIFIER effect to active_effects that gives +1 prize
+    when a Tera Pokemon knocks out the opponent's Active Pokemon this turn.
+
+    Args:
+        state: Current game state
+        card: Briar CardInstance
+        action: Play supporter action
+
+    Returns:
+        Modified GameState with Briar effect active
+    """
+    player = state.get_player(action.player_id)
+
+    # Mark supporter as played
+    player.supporter_played_this_turn = True
+
+    # Move Briar from hand to discard
+    player.hand.remove_card(card.id)
+    player.discard.add_card(card)
+
+    # Add prize modifier effect for this turn
+    # The effect uses a dict format that _calculate_prizes expects
+    briar_effect_data = {
+        'type': 'PRIZE_COUNT_MODIFIER',
+        'name': 'Briar',
+        'source_card_id': card.id,
+        'source_player_id': action.player_id,
+        'modifier': 1,  # +1 prize
+        'condition_check': _briar_prize_condition,
+        'created_turn': state.turn_count,
+        'expires_at_turn_end': True,  # Only lasts this turn
+    }
+
+    state.active_effects.append(briar_effect_data)
 
     return state
