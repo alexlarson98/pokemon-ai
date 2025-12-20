@@ -438,10 +438,11 @@ class PokemonEngine:
         # Generate SELECT_CARD action for each available card (only if we can still select more)
         if remaining_selections > 0:
             # Deduplicate by functional ID for certain purposes
-            # so identical cards show as one option
+            # so identical cards show as one option (reduces branching factor)
             should_deduplicate = step.purpose in (
                 SelectionPurpose.ENERGY_TO_ATTACH,
                 SelectionPurpose.EVOLUTION_STAGE,  # Rare Candy Stage 2 selection
+                SelectionPurpose.DISCARD_COST,     # Ultra Ball discard - functionally identical
             )
 
             if should_deduplicate:
