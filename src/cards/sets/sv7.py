@@ -14,6 +14,14 @@ from .svp import (
     noctowl_speed_wing_effect,
 )
 
+# Import Terapagos ex Version 1 from svp (reprint)
+from .svp import (
+    terapagos_ex_unified_beatdown_actions,
+    terapagos_ex_unified_beatdown_effect,
+    terapagos_ex_crown_opal_actions,
+    terapagos_ex_crown_opal_effect,
+)
+
 
 # ============================================================================
 # HOOTHOOT - VERSION 2: TRIPLE STAB (sv7-114)
@@ -112,6 +120,44 @@ SV7_LOGIC = {
             "category": "hook",
             "trigger": "on_evolve",
             "effect": noctowl_jewel_seeker_hook,
+        },
+    },
+
+    # Terapagos ex - Version 1 (Reprint from svp-165)
+    "sv7-128": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv7-170": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv7-173": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
         },
     },
 }

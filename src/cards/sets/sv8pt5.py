@@ -28,6 +28,10 @@ from .svp import (
     noctowl_jewel_seeker_hook,
     noctowl_speed_wing_actions,
     noctowl_speed_wing_effect,
+    terapagos_ex_unified_beatdown_actions,
+    terapagos_ex_unified_beatdown_effect,
+    terapagos_ex_crown_opal_actions,
+    terapagos_ex_crown_opal_effect,
 )
 from cards.library.trainers import (
     professors_research_actions,
@@ -225,6 +229,46 @@ SV8PT5_LOGIC = {
             "category": "activatable",
             "generator": professors_research_actions,
             "effect": professors_research_effect,
+        },
+    },
+
+    # Terapagos ex - Version 1 (Tera variant, reprint from svp-165)
+    "sv8pt5-169": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv8pt5-180": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+
+    # Terapagos ex - Version 2 (non-Tera variant)
+    "sv8pt5-92": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
         },
     },
 }

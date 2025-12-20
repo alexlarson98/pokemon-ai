@@ -1,0 +1,180 @@
+# Terapagos ex Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** svp-165, sv7-128, sv7-170, sv7-173, sv8pt5-169, sv8pt5-180 | **Type:** Pokemon (Basic, Tera, ex) | **HP:** 230
+
+### Attack: Unified Beatdown [CC] 30x
+_If you go second, you can't use this attack during your first turn. This attack does 30 damage for each of your Benched Pokemon._
+- Implement `terapagos_ex_unified_beatdown_actions` and `terapagos_ex_unified_beatdown_effect`.
+
+### Attack: Crown Opal [GWL] 180
+_During your opponent's next turn, prevent all damage done to this Pokemon by attacks from Basic non-Colorless Pokemon._
+- Implement `terapagos_ex_crown_opal_actions` and `terapagos_ex_crown_opal_effect`.
+
+### Registry (`svp.py`)
+```python
+SVP_LOGIC = {
+    "svp-165": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv7.py`)
+```python
+from cards.sets.svp import (
+    terapagos_ex_unified_beatdown_actions,
+    terapagos_ex_unified_beatdown_effect,
+    terapagos_ex_crown_opal_actions,
+    terapagos_ex_crown_opal_effect,
+)
+
+SV7_LOGIC = {
+    "sv7-128": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv7-170": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv7-173": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+}
+```
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.svp import (
+    terapagos_ex_unified_beatdown_actions,
+    terapagos_ex_unified_beatdown_effect,
+    terapagos_ex_crown_opal_actions,
+    terapagos_ex_crown_opal_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-169": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+    "sv8pt5-180": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv8pt5-92 | **Type:** Pokemon (Basic, ex) | **HP:** 230
+
+### Attack: Unified Beatdown [CC] 30x
+_If you go second, you can't use this attack during your first turn. This attack does 30 damage for each of your Benched Pokemon._
+- Implement `terapagos_ex_unified_beatdown_actions` and `terapagos_ex_unified_beatdown_effect`.
+
+### Attack: Crown Opal [GWL] 180
+_During your opponent's next turn, prevent all damage done to this Pokemon by attacks from Basic non-Colorless Pokemon._
+- Implement `terapagos_ex_crown_opal_actions` and `terapagos_ex_crown_opal_effect`.
+
+### Registry (`sv8pt5.py`)
+```python
+SV8PT5_LOGIC = {
+    "sv8pt5-92": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
+        },
+    },
+}
+```
+

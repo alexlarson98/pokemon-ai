@@ -628,6 +628,161 @@ def noctowl_speed_wing_effect(state: GameState, card: CardInstance, action: Acti
 
 
 # ============================================================================
+# TERAPAGOS EX - UNIFIED BEATDOWN + CROWN OPAL (svp-165)
+# ============================================================================
+
+def terapagos_ex_unified_beatdown_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Terapagos ex's "Unified Beatdown" attack.
+
+    Attack: Unified Beatdown [CC]
+    If you go second, you can't use this attack during your first turn.
+    This attack does 30 damage for each of your Benched Pokémon.
+
+    Args:
+        state: Current game state
+        card: Terapagos ex CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action, or empty if restricted
+    """
+    # Check first turn restriction for player who went second
+    player_went_second = (state.starting_player_id != player.player_id)
+    is_first_turn = (state.turn_count == 1)
+
+    if player_went_second and is_first_turn:
+        # Cannot use this attack on first turn if went second
+        return []
+
+    bench_count = player.board.get_bench_count()
+    damage = 30 * bench_count
+
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Unified Beatdown",
+        display_label=f"Unified Beatdown - {damage} Dmg (30 x {bench_count} bench)"
+    )]
+
+
+def terapagos_ex_unified_beatdown_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Terapagos ex's "Unified Beatdown" attack effect.
+
+    Deals 30 damage for each of your Benched Pokémon.
+
+    Args:
+        state: Current game state
+        card: Terapagos ex CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    player = state.get_player(action.player_id)
+    opponent = state.get_opponent()
+
+    bench_count = player.board.get_bench_count()
+    base_damage = 30 * bench_count
+
+    # Deal damage to opponent's Active Pokémon
+    if opponent.board.active_spot and base_damage > 0:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=base_damage,
+            attack_name="Unified Beatdown"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    return state
+
+
+def terapagos_ex_crown_opal_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Terapagos ex's "Crown Opal" attack.
+
+    Attack: Crown Opal [GWL]
+    180 damage. During your opponent's next turn, prevent all damage done
+    to this Pokémon by attacks from Basic non-Colorless Pokémon.
+
+    Args:
+        state: Current game state
+        card: Terapagos ex CardInstance
+        player: PlayerState of the attacking player
+
+    Returns:
+        List with single attack action
+    """
+    return [Action(
+        action_type=ActionType.ATTACK,
+        player_id=player.player_id,
+        card_id=card.id,
+        attack_name="Crown Opal",
+        display_label="Crown Opal - 180 Dmg (Protect vs Basic non-Colorless)"
+    )]
+
+
+def terapagos_ex_crown_opal_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Terapagos ex's "Crown Opal" attack effect.
+
+    Deals 180 damage to opponent's Active Pokémon.
+    During opponent's next turn, prevent all damage from Basic non-Colorless Pokémon.
+
+    Args:
+        state: Current game state
+        card: Terapagos ex CardInstance
+        action: Attack action
+
+    Returns:
+        Modified GameState
+    """
+    player = state.get_player(action.player_id)
+    opponent = state.get_opponent()
+
+    # Deal 180 damage to opponent's Active Pokémon
+    if opponent.board.active_spot:
+        final_damage = calculate_damage(
+            state=state,
+            attacker=card,
+            defender=opponent.board.active_spot,
+            base_damage=180,
+            attack_name="Crown Opal"
+        )
+
+        state = apply_damage(
+            state=state,
+            target=opponent.board.active_spot,
+            damage=final_damage,
+            is_attack_damage=True,
+            attacker=card
+        )
+
+    # Apply damage prevention effect to self (Terapagos ex)
+    # Prevents damage from Basic non-Colorless Pokémon until end of opponent's turn
+    card.attack_effects.append({
+        'effect_type': 'prevent_damage',
+        'condition': 'basic_non_colorless',  # Only blocks Basic non-Colorless attackers
+        'source_card_id': card.id,
+        'expires_at_end_of_turn': True,
+        'expires_player_id': opponent.player_id
+    })
+
+    return state
+
+
+# ============================================================================
 # SVP LOGIC REGISTRY
 # ============================================================================
 
@@ -710,6 +865,20 @@ SVP_LOGIC = {
             "category": "hook",
             "trigger": "on_evolve",
             "effect": noctowl_jewel_seeker_hook,
+        },
+    },
+
+    # Terapagos ex - Version 1: Unified Beatdown + Crown Opal
+    "svp-165": {
+        "Unified Beatdown": {
+            "category": "attack",
+            "generator": terapagos_ex_unified_beatdown_actions,
+            "effect": terapagos_ex_unified_beatdown_effect,
+        },
+        "Crown Opal": {
+            "category": "attack",
+            "generator": terapagos_ex_crown_opal_actions,
+            "effect": terapagos_ex_crown_opal_effect,
         },
     },
 

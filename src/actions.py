@@ -1353,6 +1353,9 @@ def _has_damage_prevention(state: GameState, pokemon: CardInstance, attacker: Ca
     Returns:
         True if damage should be prevented
     """
+    from cards.registry import create_card
+    from models import Subtype, EnergyType
+
     # Check active effects for damage immunity
     for effect in state.active_effects:
         # Check if effect applies to this Pokemon
@@ -1373,7 +1376,6 @@ def _has_damage_prevention(state: GameState, pokemon: CardInstance, attacker: Ca
 
             if prevent_source_types:
                 # Get attacker's subtypes
-                from cards.registry import create_card
                 attacker_card = create_card(attacker.card_id)
 
                 if attacker_card and hasattr(attacker_card, 'subtypes'):
@@ -1391,6 +1393,30 @@ def _has_damage_prevention(state: GameState, pokemon: CardInstance, attacker: Ca
 
                             if not has_exception:
                                 return True  # Prevent damage
+
+    # Check pokemon.attack_effects for damage prevention (e.g., Crown Opal)
+    if hasattr(pokemon, 'attack_effects'):
+        for effect in pokemon.attack_effects:
+            if isinstance(effect, dict) and effect.get('effect_type') == 'prevent_damage':
+                condition = effect.get('condition')
+
+                # Unconditional damage prevention
+                if condition is None or condition == 'all':
+                    return True
+
+                # Conditional: basic_non_colorless - blocks Basic non-Colorless attackers
+                if condition == 'basic_non_colorless' and attacker:
+                    attacker_card = create_card(attacker.card_id)
+                    if attacker_card:
+                        # Check if attacker is Basic
+                        is_basic = hasattr(attacker_card, 'subtypes') and Subtype.BASIC in attacker_card.subtypes
+
+                        # Check if attacker is Colorless type
+                        is_colorless = hasattr(attacker_card, 'types') and EnergyType.COLORLESS in attacker_card.types
+
+                        # Prevent damage if Basic AND NOT Colorless
+                        if is_basic and not is_colorless:
+                            return True
 
     return False
 
