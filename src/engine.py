@@ -3098,6 +3098,30 @@ class PokemonEngine:
             from actions import draw_card
             state = draw_card(state, completed_step.player_id, 2)
 
+        elif callback == "bosss_orders_switch":
+            # Switch opponent's selected benched Pokemon to active
+            # The step's player_id is the opponent (whose bench we selected from)
+            opponent = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                target_id = completed_step.selected_card_ids[0]
+
+                # Find the target in opponent's bench
+                target_idx = None
+                for i, pokemon in enumerate(opponent.board.bench):
+                    if pokemon.id == target_id:
+                        target_idx = i
+                        break
+
+                if target_idx is not None:
+                    # Swap the benched Pokemon with the active
+                    old_active = opponent.board.active_spot
+                    new_active = opponent.board.bench.pop(target_idx)
+                    opponent.board.active_spot = new_active
+
+                    if old_active:
+                        opponent.board.bench.append(old_active)
+
         return state
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:

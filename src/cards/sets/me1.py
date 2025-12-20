@@ -8,9 +8,18 @@ from ..library.trainers import (
     rare_candy_actions,
     ultra_ball_effect,
     ultra_ball_actions,
+    bosss_orders_actions,
+    bosss_orders_effect,
 )
 
 ME1_LOGIC = {
+    "me1-114": {  # Boss's Orders
+        "Play Boss's Orders": {
+            "category": "activatable",
+            "generator": bosss_orders_actions,
+            "effect": bosss_orders_effect,
+        },
+    },
     "me1-125": {  # Rare Candy
         "Play Rare Candy": {
             "category": "activatable",

@@ -601,3 +601,92 @@ def briar_effect(state: GameState, card: CardInstance, action: Action) -> GameSt
     state.active_effects.append(briar_effect_data)
 
     return state
+
+
+# ============================================================================
+# BOSS'S ORDERS - SUPPORTER (me1-114, sv2-172, sv3-181, sv4-215)
+# ============================================================================
+
+def bosss_orders_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Boss's Orders supporter card.
+
+    Boss's Orders: Switch in 1 of your opponent's Benched Pokemon to the Active Spot.
+
+    Can only be played if:
+    1. Supporter hasn't been played this turn
+    2. Opponent has at least 1 benched Pokemon
+
+    Args:
+        state: Current game state
+        card: Boss's Orders CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List with play action if conditions are met, empty list otherwise
+    """
+    # Check if supporter already played this turn
+    if player.supporter_played_this_turn:
+        return []
+
+    # Check if opponent has benched Pokemon
+    opponent = state.get_opponent()
+    if not opponent.board.bench or len(opponent.board.bench) == 0:
+        return []
+
+    return [Action(
+        action_type=ActionType.PLAY_SUPPORTER,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Play Boss's Orders (switch opponent's benched to active)"
+    )]
+
+
+def bosss_orders_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Boss's Orders supporter effect.
+
+    Switch in 1 of your opponent's Benched Pokemon to the Active Spot.
+
+    Uses Stack Architecture:
+    1. Push SelectFromZoneStep targeting opponent's bench
+    2. On complete callback executes the switch
+
+    Args:
+        state: Current game state
+        card: Boss's Orders CardInstance
+        action: Play supporter action
+
+    Returns:
+        Modified GameState with selection step pushed
+    """
+    from models import SelectFromZoneStep, ZoneType, SelectionPurpose
+
+    player = state.get_player(action.player_id)
+    opponent = state.get_opponent()
+
+    # Mark supporter as played
+    player.supporter_played_this_turn = True
+
+    # Move Boss's Orders from hand to discard
+    player.hand.remove_card(card.id)
+    player.discard.add_card(card)
+
+    # Push SelectFromZoneStep targeting OPPONENT'S bench
+    # Note: player_id is set to opponent so _get_zone_cards targets their bench
+    select_target_step = SelectFromZoneStep(
+        source_card_id=card.id,
+        source_card_name="Boss's Orders",
+        player_id=opponent.player_id,  # Target opponent's zone
+        purpose=SelectionPurpose.SWITCH_TARGET,
+        zone=ZoneType.BENCH,
+        count=1,
+        min_count=1,  # Must select exactly 1
+        exact_count=True,
+        filter_criteria={},  # Any benched Pokemon
+        context={'acting_player_id': action.player_id},  # Track who played it
+        on_complete_callback="bosss_orders_switch"
+    )
+
+    state.push_step(select_target_step)
+    return state
