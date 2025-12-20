@@ -124,13 +124,14 @@ from engine import PokemonEngine
 # =============================================================================
 
 # Cards we know exist and work
+# NOTE: Only include actual Basic Pokemon here (not Stage 1/2)
+# because tests use Nest Ball which only searches for Basic Pokemon
 BASIC_POKEMON = [
     "sv3pt5-16",   # Pidgey (50 HP, Call for Family + Tackle)
     "sv3-162",     # Pidgey (60 HP, Gust) - different functional ID
     "sv4pt5-7",    # Charmander (70 HP)
     "svp-44",      # Charmander (60 HP, Heat Tackle)
     "svp-47",      # Charmander (70 HP, Ember)
-    "svp-56",      # Charizard ex (Basic ex, 330 HP)
     "sv5-126",     # Hoothoot (70 HP, Silent Wing)
     "sv7-114",     # Hoothoot (70 HP, Triple Stab)
     "sv8pt5-77",   # Hoothoot (80 HP, Tackle + Insomnia ability)
@@ -933,7 +934,16 @@ class TestFunctionalIdSearchDeduplication:
         assert len(func_ids) == 1, f"Expected 1 option for identical cards, got {len(func_ids)}: {func_ids}"
 
     def test_same_pidgey_all_in_prizes(self, engine):
-        """Two identical Pidgeys ALL in prizes should still show as ONE option (theoretical)."""
+        """Two identical Pidgeys ALL in prizes should show as ZERO options (not in deck).
+
+        With the knowledge layer update, once a SearchDeckStep is pushed,
+        has_searched_deck is set to True immediately. This means the search
+        uses perfect knowledge (actual deck contents only), not theoretical
+        deck (which would include prized cards).
+
+        Since all Pidgeys are prized (not in the actual deck), the search
+        correctly returns 0 selectable options.
+        """
         state, search_id = self.create_controlled_state(
             deck_card_ids=["sv1-258"],  # Just energy in deck
             prize_card_ids=["sv3pt5-16", "sv3pt5-16"],  # 2 Pidgey in prizes
@@ -947,11 +957,11 @@ class TestFunctionalIdSearchDeduplication:
         play = [a for a in actions if a.action_type == ActionType.PLAY_ITEM and a.card_id == search_id][0]
         state = engine.step(state, play)
 
-        # Get search options - should include theoretical cards
+        # Get search options - with perfect knowledge, prized cards are not shown
         func_ids = self.get_search_option_functional_ids(state, engine)
 
-        # Should be exactly 1 unique functional ID
-        assert len(func_ids) == 1, f"Expected 1 option for identical cards in prizes, got {len(func_ids)}: {func_ids}"
+        # Should be 0 options since all Pidgeys are prized (not in actual deck)
+        assert len(func_ids) == 0, f"Expected 0 options for cards all in prizes, got {len(func_ids)}: {func_ids}"
 
     # -------------------------------------------------------------------------
     # DIFFERENT FUNCTIONAL ID TESTS (should show as separate options)
@@ -981,7 +991,11 @@ class TestFunctionalIdSearchDeduplication:
         assert len(func_ids) == 2, f"Expected 2 options for different cards, got {len(func_ids)}: {func_ids}"
 
     def test_different_pidgeys_split_deck_prizes(self, engine):
-        """Two DIFFERENT Pidgeys split deck/prizes should show as TWO options (before search)."""
+        """Two DIFFERENT Pidgeys split deck/prizes should show as ONE option (only deck).
+
+        With perfect knowledge (has_searched_deck=True set when SearchDeckStep is pushed),
+        only the card actually in the deck is shown, not the one in prizes.
+        """
         # sv3pt5-16: Pidgey 50HP (Call for Family, Tackle)
         # sv3-162: Pidgey 60HP (Gust)
         state, search_id = self.create_controlled_state(
@@ -997,11 +1011,11 @@ class TestFunctionalIdSearchDeduplication:
         play = [a for a in actions if a.action_type == ActionType.PLAY_ITEM and a.card_id == search_id][0]
         state = engine.step(state, play)
 
-        # Get search options
+        # Get search options - only deck cards shown with perfect knowledge
         func_ids = self.get_search_option_functional_ids(state, engine)
 
-        # Should be exactly 2 unique functional IDs
-        assert len(func_ids) == 2, f"Expected 2 options for different cards, got {len(func_ids)}: {func_ids}"
+        # Should be exactly 1 (only the Pidgey in deck, not the prized one)
+        assert len(func_ids) == 1, f"Expected 1 option for card in deck (not prized), got {len(func_ids)}: {func_ids}"
 
     # -------------------------------------------------------------------------
     # MIXED SCENARIOS (combination of same and different)
@@ -1060,11 +1074,11 @@ class TestFunctionalIdSearchDeduplication:
     @pytest.mark.parametrize("distribution", [
         # (deck_count_A, prize_count_A, deck_count_B, prize_count_B)
         (2, 0, 0, 0),  # 2 same in deck
-        (1, 1, 0, 0),  # 2 same split
-        (0, 2, 0, 0),  # 2 same in prizes
+        (1, 1, 0, 0),  # 1 in deck, 1 in prizes (only deck shown)
+        (0, 2, 0, 0),  # 2 same in prizes (none shown)
         (2, 0, 2, 0),  # 2+2 different, all deck
-        (1, 1, 1, 1),  # 2+2 different, all split
-        (0, 2, 0, 2),  # 2+2 different, all prizes
+        (1, 1, 1, 1),  # 2+2 different, split (only deck shown)
+        (0, 2, 0, 2),  # 2+2 different, all prizes (none shown)
         (2, 1, 1, 0),  # asymmetric
         (1, 0, 2, 1),  # asymmetric
         (3, 1, 2, 2),  # larger counts
@@ -1076,6 +1090,9 @@ class TestFunctionalIdSearchDeduplication:
         Uses two different Pidgey versions:
         - Version A: sv3pt5-16 (50 HP, Call for Family + Tackle)
         - Version B: sv3-162 (60 HP, Gust)
+
+        With perfect knowledge (has_searched_deck=True set when SearchDeckStep is pushed),
+        only cards actually in the deck are shown as search options, not prized cards.
         """
         deck_a, prize_a, deck_b, prize_b = distribution
 
@@ -1106,13 +1123,13 @@ class TestFunctionalIdSearchDeduplication:
         # Get search options
         func_ids = self.get_search_option_functional_ids(state, engine)
 
-        # Calculate expected count
-        has_version_a = (deck_a + prize_a) > 0
-        has_version_b = (deck_b + prize_b) > 0
-        expected_count = int(has_version_a) + int(has_version_b)
+        # Calculate expected count - only deck cards are shown (not prized)
+        has_version_a_in_deck = deck_a > 0
+        has_version_b_in_deck = deck_b > 0
+        expected_count = int(has_version_a_in_deck) + int(has_version_b_in_deck)
 
         assert len(func_ids) == expected_count, (
-            f"Distribution {distribution}: Expected {expected_count} options, got {len(func_ids)}: {func_ids}"
+            f"Distribution {distribution}: Expected {expected_count} options (deck only), got {len(func_ids)}: {func_ids}"
         )
 
     @pytest.mark.parametrize("seed", range(100))
@@ -1122,6 +1139,9 @@ class TestFunctionalIdSearchDeduplication:
 
         This is the "infinite combinations" fuzzer - it generates random
         prize/deck splits and verifies the invariant holds.
+
+        With perfect knowledge (has_searched_deck=True set when SearchDeckStep is pushed),
+        only cards actually in the deck are shown as search options.
         """
         random.seed(seed)
 
@@ -1132,7 +1152,7 @@ class TestFunctionalIdSearchDeduplication:
         # For each version, decide how many copies (1-4) and how to split
         deck_cards = []
         prize_cards = []
-        expected_functional_ids = set()
+        deck_functional_ids = set()  # Only track deck cards for expected result
 
         for card_id in versions:
             count = random.randint(1, 4)
@@ -1143,15 +1163,20 @@ class TestFunctionalIdSearchDeduplication:
             deck_cards.extend([card_id] * deck_count)
             prize_cards.extend([card_id] * prize_count)
 
-            # Track expected functional ID
-            card_def = create_card(card_id)
-            if card_def and isinstance(card_def, PokemonCard):
-                func_id = engine._compute_functional_id(card_def)
-                expected_functional_ids.add(func_id)
+            # Track expected functional ID only if in deck
+            if deck_count > 0:
+                card_def = create_card(card_id)
+                if card_def and isinstance(card_def, PokemonCard):
+                    func_id = engine._compute_functional_id(card_def)
+                    deck_functional_ids.add(func_id)
 
         # Need at least one card somewhere
         if not deck_cards and not prize_cards:
             deck_cards = [random.choice(BASIC_POKEMON)]
+            # Add to expected if we added to deck
+            card_def = create_card(deck_cards[0])
+            if card_def and isinstance(card_def, PokemonCard):
+                deck_functional_ids.add(engine._compute_functional_id(card_def))
 
         state, search_id = self.create_controlled_state(
             deck_card_ids=deck_cards,
@@ -1173,11 +1198,11 @@ class TestFunctionalIdSearchDeduplication:
         # Get search options
         func_ids = self.get_search_option_functional_ids(state, engine)
 
-        # Verify deduplication
-        assert len(func_ids) <= len(expected_functional_ids), (
-            f"Seed {seed}: Got MORE options ({len(func_ids)}) than unique functional IDs ({len(expected_functional_ids)})\n"
+        # Verify deduplication - only deck cards should be shown
+        assert func_ids == deck_functional_ids, (
+            f"Seed {seed}: Search options don't match deck functional IDs\n"
             f"Deck: {deck_cards}\nPrizes: {prize_cards}\n"
-            f"Got: {func_ids}\nExpected at most: {expected_functional_ids}"
+            f"Got: {func_ids}\nExpected (deck only): {deck_functional_ids}"
         )
 
 

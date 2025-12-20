@@ -33,6 +33,12 @@ from .svp import (
     terapagos_ex_crown_opal_actions,
     terapagos_ex_crown_opal_effect,
 )
+from .sv7 import (
+    fan_rotom_fan_call_actions,
+    fan_rotom_fan_call_effect,
+    fan_rotom_assault_landing_actions,
+    fan_rotom_assault_landing_effect,
+)
 from cards.library.trainers import (
     professors_research_actions,
     professors_research_effect,
@@ -185,6 +191,20 @@ SV8PT5_LOGIC = {
             "guard_type": "status_condition",
             "scope": "self",
             "effect": hoothoot_insomnia_guard,
+        },
+    },
+
+    # Fan Rotom - Reprint from sv7-118
+    "sv8pt5-85": {
+        "Fan Call": {
+            "category": "activatable",
+            "generator": fan_rotom_fan_call_actions,
+            "effect": fan_rotom_fan_call_effect,
+        },
+        "Assault Landing": {
+            "category": "attack",
+            "generator": fan_rotom_assault_landing_actions,
+            "effect": fan_rotom_assault_landing_effect,
         },
     },
 

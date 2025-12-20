@@ -1,0 +1,104 @@
+# Fan Rotom Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+**Card IDs:** sv7-118, sv8pt5-85 | **Type:** Pokemon (Basic) | **HP:** 70
+
+### Feature: Fan Call (ACTION)
+_Once during your first turn, you may search your deck for up to 3 Colorless Pokemon with 100 HP or less, reveal them, and put them into your hand. Then, shuffle your deck. You can't use more than 1 Fan Call Ability during your turn._
+
+- Implement `fan_rotom_fan_call_actions(state, card, player)` (Generator)
+- Implement `fan_rotom_fan_call_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SEARCH_DECK`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # shuffle_after=True
+    # SearchDeckStep
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SearchDeckStep`
+  - `shuffle_after=True`
+
+### Attack: Assault Landing [C] 70
+_If there is no Stadium in play, this attack does nothing._
+- Implement `fan_rotom_assault_landing_actions` and `fan_rotom_assault_landing_effect`.
+
+### Registry (`sv7.py`)
+```python
+SV7_LOGIC = {
+    "sv7-118": {
+        "Fan Call": {
+            "category": "activatable",
+            "generator": fan_rotom_fan_call_actions,
+            "effect": fan_rotom_fan_call_effect,
+        },
+        "Assault Landing": {
+            "category": "attack",
+            "generator": fan_rotom_assault_landing_actions,
+            "effect": fan_rotom_assault_landing_effect,
+        },
+    },
+}
+```
+
+**Reprints:**
+
+### Registry (`sv8pt5.py`)
+```python
+from cards.sets.sv7 import (
+    fan_rotom_fan_call_actions,
+    fan_rotom_fan_call_effect,
+    fan_rotom_assault_landing_actions,
+    fan_rotom_assault_landing_effect,
+)
+
+SV8PT5_LOGIC = {
+    "sv8pt5-85": {
+        "Fan Call": {
+            "category": "activatable",
+            "generator": fan_rotom_fan_call_actions,
+            "effect": fan_rotom_fan_call_effect,
+        },
+        "Assault Landing": {
+            "category": "attack",
+            "generator": fan_rotom_assault_landing_actions,
+            "effect": fan_rotom_assault_landing_effect,
+        },
+    },
+}
+```
+

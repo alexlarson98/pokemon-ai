@@ -828,6 +828,7 @@ class PokemonEngine:
         - supertype: 'Pokemon', 'Trainer', 'Energy'
         - subtype: 'Basic', 'Stage 1', 'Stage 2', 'Item', etc.
         - max_hp: Maximum HP for Pokemon
+        - pokemon_type: Pokemon type (e.g., 'Colorless', 'Fire', 'Water')
         - energy_type: For energy cards
         - name: Specific card name
         - evolves_from: For evolution filtering
@@ -835,7 +836,7 @@ class PokemonEngine:
         """
         from cards.registry import create_card
         from cards.base import PokemonCard, EnergyCard, TrainerCard
-        from models import Subtype, Supertype
+        from models import Subtype, Supertype, EnergyType
 
         if not filter_criteria:
             return True
@@ -867,6 +868,18 @@ class PokemonEngine:
             if not isinstance(card_def, PokemonCard):
                 return False
             if card_def.hp > filter_criteria['max_hp']:
+                return False
+
+        # Check pokemon_type (for Fan Rotom's Fan Call, etc.)
+        if 'pokemon_type' in filter_criteria:
+            if not isinstance(card_def, PokemonCard):
+                return False
+            required_type = filter_criteria['pokemon_type']
+            # Convert string to EnergyType if needed
+            if isinstance(required_type, str):
+                required_type = EnergyType(required_type)
+            # Check if the Pokemon has this type
+            if not hasattr(card_def, 'types') or required_type not in card_def.types:
                 return False
 
         # Check energy_type
