@@ -972,8 +972,13 @@ def evolve_pokemon(
 
     # Transfer active effects that target this specific Pokémon
     for effect in state.active_effects:
-        if effect.target_card_id == target.id:
-            effect.target_card_id = evolution_card.id
+        # Handle both ActiveEffect objects and dict representations
+        if isinstance(effect, dict):
+            if effect.get('target_card_id') == target.id:
+                effect['target_card_id'] = evolution_card.id
+        else:
+            if effect.target_card_id == target.id:
+                effect.target_card_id = evolution_card.id
 
     # Replace target with evolved Pokémon
     if target_location == 'active':

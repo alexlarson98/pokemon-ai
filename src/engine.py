@@ -3476,7 +3476,21 @@ class PokemonEngine:
         # Filter out expired effects from global active_effects
         active_effects = []
         for effect in state.active_effects:
-            if not effect.is_expired(current_turn, current_player, current_phase):
+            # Handle both ActiveEffect objects and dict representations
+            if isinstance(effect, dict):
+                # Dict effects don't have is_expired - check manually
+                duration_turns = effect.get('duration_turns', 1)
+                created_turn = effect.get('created_turn', 0)
+                if duration_turns == -1:
+                    # Permanent effect
+                    is_expired = False
+                else:
+                    turns_elapsed = current_turn - created_turn
+                    is_expired = turns_elapsed >= duration_turns
+            else:
+                is_expired = effect.is_expired(current_turn, current_player, current_phase)
+
+            if not is_expired:
                 active_effects.append(effect)
 
         state.active_effects = active_effects
@@ -4105,13 +4119,21 @@ class PokemonEngine:
         # Step 2: Apply retreat cost modifiers from active effects (Tools, legacy effects)
         modifier = 0
         for effect in state.active_effects:
+            # Handle both ActiveEffect objects and dict representations
+            if isinstance(effect, dict):
+                target_card_id = effect.get('target_card_id')
+                params = effect.get('params', {})
+            else:
+                target_card_id = effect.target_card_id
+                params = effect.params
+
             # Check if effect applies to this Pokémon
-            if effect.target_card_id and effect.target_card_id != pokemon.id:
+            if target_card_id and target_card_id != pokemon.id:
                 continue
 
             # Apply retreat cost modifier (e.g., Float Stone: -2, Air Balloon: -1)
-            if "retreat_cost_modifier" in effect.params:
-                modifier += effect.params["retreat_cost_modifier"]
+            if "retreat_cost_modifier" in params:
+                modifier += params["retreat_cost_modifier"]
 
         current_cost = current_cost + modifier
 
