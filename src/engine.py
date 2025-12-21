@@ -3157,6 +3157,24 @@ class PokemonEngine:
                 # Shuffle the deck
                 state = shuffle_deck(state, completed_step.player_id)
 
+        elif callback == "night_stretcher_to_hand":
+            # Move selected card from discard pile into hand
+            player = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                # Should only be 1 card for Night Stretcher
+                for card_id in completed_step.selected_card_ids:
+                    # Find and remove from discard
+                    card = None
+                    for i, discard_card in enumerate(player.discard.cards):
+                        if discard_card.id == card_id:
+                            card = player.discard.cards.pop(i)
+                            break
+
+                    # Add to hand
+                    if card:
+                        player.hand.add_card(card)
+
         return state
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:

@@ -9,6 +9,7 @@ from models import (
     SelectFromZoneStep, ZoneType, SelectionPurpose
 )
 from actions import apply_damage, calculate_damage
+from ..library.trainers import night_stretcher_actions, night_stretcher_effect
 
 
 # ============================================================================
@@ -161,6 +162,15 @@ SV8_LOGIC = {
             "category": "attack",
             "generator": klefki_hook_actions,
             "effect": klefki_hook_effect,
+        },
+    },
+
+    # Night Stretcher - Item
+    "sv8-251": {
+        "Play Night Stretcher": {
+            "category": "activatable",
+            "generator": night_stretcher_actions,
+            "effect": night_stretcher_effect,
         },
     },
 }

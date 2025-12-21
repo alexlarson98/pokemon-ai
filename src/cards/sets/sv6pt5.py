@@ -8,6 +8,7 @@ from itertools import combinations
 from models import GameState, CardInstance, Action, ActionType, PlayerState, SelectFromZoneStep, ZoneType, SelectionPurpose
 from actions import apply_damage, calculate_damage, place_damage_counters, force_knockout
 from cards.factory import get_card_definition
+from ..library.trainers import night_stretcher_actions, night_stretcher_effect
 
 
 # ============================================================================
@@ -841,6 +842,15 @@ SV6PT5_LOGIC = {
             "category": "attack",
             "generator": dusknoir_shadow_bind_actions,
             "effect": dusknoir_shadow_bind_effect,
+        },
+    },
+
+    # Night Stretcher - Item
+    "sv6pt5-61": {
+        "Play Night Stretcher": {
+            "category": "activatable",
+            "generator": night_stretcher_actions,
+            "effect": night_stretcher_effect,
         },
     },
 }

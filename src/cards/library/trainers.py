@@ -782,3 +782,96 @@ def super_rod_effect(state: GameState, card: CardInstance, action: Action) -> Ga
 
     state.push_step(select_recover_step)
     return state
+
+
+# ============================================================================
+# NIGHT STRETCHER - ITEM (sv6pt5-61, sv8-251, me1-173)
+# ============================================================================
+
+def night_stretcher_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Night Stretcher item card.
+
+    Night Stretcher: Put a Pokemon or a Basic Energy card from your discard pile
+    into your hand.
+
+    Can only be played if:
+    1. Player has at least 1 Pokemon or Basic Energy in discard pile
+
+    Args:
+        state: Current game state
+        card: Night Stretcher CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List with play action if conditions are met, empty list otherwise
+    """
+    from cards.registry import create_card
+    from cards.base import PokemonCard, EnergyCard
+    from models import Subtype
+
+    # Check if there are any valid targets in the discard pile
+    has_valid_target = False
+    for discard_card in player.discard.cards:
+        card_def = create_card(discard_card.card_id)
+        if card_def:
+            # Pokemon cards are valid
+            if isinstance(card_def, PokemonCard):
+                has_valid_target = True
+                break
+            # Basic Energy cards are valid
+            if isinstance(card_def, EnergyCard) and Subtype.BASIC in card_def.subtypes:
+                has_valid_target = True
+                break
+
+    if not has_valid_target:
+        return []
+
+    return [Action(
+        action_type=ActionType.PLAY_ITEM,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Play Night Stretcher (recover 1 Pokemon/Basic Energy to hand)"
+    )]
+
+
+def night_stretcher_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Night Stretcher item effect.
+
+    Put a Pokemon or a Basic Energy card from your discard pile into your hand.
+
+    Uses Stack Architecture:
+    1. Push SelectFromZoneStep targeting player's discard pile
+    2. On complete callback moves selected card to hand
+
+    Args:
+        state: Current game state
+        card: Night Stretcher CardInstance
+        action: Play item action
+
+    Returns:
+        Modified GameState with selection step pushed
+    """
+    from models import SelectFromZoneStep, ZoneType, SelectionPurpose
+
+    # NOTE: Do NOT discard Night Stretcher here - _apply_play_item() handles that after this effect returns
+
+    # Push SelectFromZoneStep targeting player's DISCARD pile
+    # Filter: Pokemon OR Basic Energy (reuse super_rod_target filter)
+    select_recover_step = SelectFromZoneStep(
+        source_card_id=card.id,
+        source_card_name="Night Stretcher",
+        player_id=action.player_id,
+        purpose=SelectionPurpose.RECOVER_TO_HAND,
+        zone=ZoneType.DISCARD,
+        count=1,
+        min_count=1,  # Must select exactly 1
+        exact_count=True,
+        filter_criteria={'super_rod_target': True},  # Custom filter: Pokemon OR Basic Energy
+        exclude_card_ids=[card.id],  # Exclude Night Stretcher itself (will be in discard when step resolves)
+        on_complete_callback="night_stretcher_to_hand"
+    )
+
+    state.push_step(select_recover_step)
+    return state
