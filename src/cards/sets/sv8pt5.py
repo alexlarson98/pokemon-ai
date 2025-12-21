@@ -44,6 +44,8 @@ from cards.library.trainers import (
     professors_research_effect,
     briar_actions,
     briar_effect,
+    prime_catcher_actions,
+    prime_catcher_effect,
 )
 
 
@@ -300,6 +302,15 @@ SV8PT5_LOGIC = {
             "category": "activatable",
             "generator": briar_actions,
             "effect": briar_effect,
+        },
+    },
+
+    # Prime Catcher - Item, ACE SPEC (reprint from sv5)
+    "sv8pt5-119": {
+        "Play Prime Catcher": {
+            "category": "activatable",
+            "generator": prime_catcher_actions,
+            "effect": prime_catcher_effect,
         },
     },
 }

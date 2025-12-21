@@ -1,0 +1,110 @@
+# Prime Catcher Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** sv5-157 | **Type:** Trainer (Item, ACE SPEC) | **HP:** N/A
+
+### Feature: play (ACTION)
+_Switch in 1 of your opponent's Benched Pokemon to the Active Spot. If you do, switch your Active Pokemon with 1 of your Benched Pokemon. You may play any number of Item cards during your turn. ACE SPEC: You can't have more than 1 ACE SPEC card in your deck._
+
+- Implement `prime_catcher_actions(state, card, player)` (Generator)
+- Implement `prime_catcher_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SWITCH_POKEMON`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (BENCH -> ACTIVE)
+    # SelectFromZoneStep (target selection)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (target selection)`
+  - `SelectFromZoneStep (BENCH -> ACTIVE)`
+
+### Registry (`sv5.py`)
+```python
+SV5_LOGIC = {
+    "sv5-157": {
+        "Play Prime Catcher": {
+            "category": "activatable",
+            "generator": prime_catcher_actions,
+            "effect": prime_catcher_effect,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv8pt5-119 | **Type:** Trainer (Item, ACE SPEC) | **HP:** N/A
+
+### Feature: play (ACTION)
+_You can't have more than 1 ACE SPEC card in your deck. Switch in 1 of your opponent's Benched Pokemon to the Active Spot. If you do, switch your Active Pokemon with 1 of your Benched Pokemon. You may play any number of Item cards during your turn._
+
+- Implement `prime_catcher_actions(state, card, player)` (Generator)
+- Implement `prime_catcher_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `SWITCH_POKEMON`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (BENCH -> ACTIVE)
+    # SelectFromZoneStep (target selection)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (target selection)`
+  - `SelectFromZoneStep (BENCH -> ACTIVE)`
+
+### Registry (`sv8pt5.py`)
+```python
+SV8PT5_LOGIC = {
+    "sv8pt5-119": {
+        "Play Prime Catcher": {
+            "category": "activatable",
+            "generator": prime_catcher_actions,
+            "effect": prime_catcher_effect,
+        },
+    },
+}
+```
+

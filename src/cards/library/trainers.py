@@ -875,3 +875,104 @@ def night_stretcher_effect(state: GameState, card: CardInstance, action: Action)
 
     state.push_step(select_recover_step)
     return state
+
+
+# ============================================================================
+# PRIME CATCHER - ITEM, ACE SPEC (sv5-157, sv8pt5-119)
+# ============================================================================
+
+def prime_catcher_actions(state: GameState, card: CardInstance, player: PlayerState) -> List[Action]:
+    """
+    Generate actions for Prime Catcher item card.
+
+    Prime Catcher: Switch in 1 of your opponent's Benched Pokemon to the Active Spot.
+    If you do, switch your Active Pokemon with 1 of your Benched Pokemon.
+
+    Can only be played if:
+    1. Opponent has at least 1 benched Pokemon
+
+    Args:
+        state: Current game state
+        card: Prime Catcher CardInstance
+        player: PlayerState of the owner
+
+    Returns:
+        List with play action if conditions are met, empty list otherwise
+    """
+    # Check if opponent has benched Pokemon
+    opponent = state.get_opponent()
+    if not opponent.board.bench or len(opponent.board.bench) == 0:
+        return []
+
+    return [Action(
+        action_type=ActionType.PLAY_ITEM,
+        player_id=player.player_id,
+        card_id=card.id,
+        display_label="Play Prime Catcher (switch opponent's benched, then switch your active)"
+    )]
+
+
+def prime_catcher_effect(state: GameState, card: CardInstance, action: Action) -> GameState:
+    """
+    Execute Prime Catcher item effect.
+
+    Switch in 1 of your opponent's Benched Pokemon to the Active Spot.
+    If you do, switch your Active Pokemon with 1 of your Benched Pokemon.
+
+    Uses Stack Architecture (LIFO - push in reverse order):
+    1. First push: Select YOUR benched Pokemon to switch in (resolves second) - only if you have bench
+    2. Second push: Select OPPONENT's benched Pokemon to switch in (resolves first)
+
+    Note: The player's switch ("If you do") is conditional - only happens if player has benched Pokemon.
+
+    Args:
+        state: Current game state
+        card: Prime Catcher CardInstance
+        action: Play item action
+
+    Returns:
+        Modified GameState with selection steps pushed
+    """
+    from models import SelectFromZoneStep, ZoneType, SelectionPurpose
+
+    # NOTE: Do NOT discard Prime Catcher here - _apply_play_item() handles that after this effect returns
+
+    player = state.get_player(action.player_id)
+    opponent = state.get_opponent()
+
+    # Push in REVERSE order (LIFO stack)
+
+    # Step 2: Select YOUR benched Pokemon to switch to active (resolves after opponent switch)
+    # Only push this step if player has benched Pokemon ("If you do" clause)
+    if player.board.bench and len(player.board.bench) > 0:
+        select_own_bench_step = SelectFromZoneStep(
+            source_card_id=card.id,
+            source_card_name="Prime Catcher",
+            player_id=player.player_id,
+            purpose=SelectionPurpose.SWITCH_TARGET,
+            zone=ZoneType.BENCH,
+            count=1,
+            min_count=1,
+            exact_count=True,
+            filter_criteria={},
+            on_complete_callback="prime_catcher_switch_own"
+        )
+        state.push_step(select_own_bench_step)
+
+    # Step 1: Select OPPONENT's benched Pokemon to switch to active (resolves first)
+    select_opponent_bench_step = SelectFromZoneStep(
+        source_card_id=card.id,
+        source_card_name="Prime Catcher",
+        player_id=opponent.player_id,  # Target opponent's zone
+        purpose=SelectionPurpose.SWITCH_TARGET,
+        zone=ZoneType.BENCH,
+        count=1,
+        min_count=1,
+        exact_count=True,
+        filter_criteria={},
+        context={'acting_player_id': action.player_id},  # Track who played it
+        on_complete_callback="prime_catcher_switch_opponent"
+    )
+    state.push_step(select_opponent_bench_step)
+
+    return state

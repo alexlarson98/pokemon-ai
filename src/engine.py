@@ -3175,6 +3175,51 @@ class PokemonEngine:
                     if card:
                         player.hand.add_card(card)
 
+        elif callback == "prime_catcher_switch_opponent":
+            # Switch opponent's selected benched Pokemon to active
+            # The player_id on the step is the opponent's ID
+            opponent = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                selected_id = completed_step.selected_card_ids[0]
+
+                # Find and remove from opponent's bench
+                new_active = None
+                for i, bench_pokemon in enumerate(opponent.board.bench):
+                    if bench_pokemon.id == selected_id:
+                        new_active = opponent.board.bench.pop(i)
+                        break
+
+                if new_active:
+                    # Move current active to bench
+                    old_active = opponent.board.active_spot
+                    opponent.board.active_spot = new_active
+
+                    if old_active:
+                        opponent.board.bench.append(old_active)
+
+        elif callback == "prime_catcher_switch_own":
+            # Switch player's selected benched Pokemon to active
+            player = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                selected_id = completed_step.selected_card_ids[0]
+
+                # Find and remove from player's bench
+                new_active = None
+                for i, bench_pokemon in enumerate(player.board.bench):
+                    if bench_pokemon.id == selected_id:
+                        new_active = player.board.bench.pop(i)
+                        break
+
+                if new_active:
+                    # Move current active to bench
+                    old_active = player.board.active_spot
+                    player.board.active_spot = new_active
+
+                    if old_active:
+                        player.board.bench.append(old_active)
+
         return state
 
     def _apply_end_turn(self, state: GameState, action: Action) -> GameState:

@@ -9,7 +9,12 @@ from models import (
     SearchDeckStep, ZoneType, SelectionPurpose
 )
 from actions import apply_damage, calculate_damage
-from ..library.trainers import buddy_buddy_poffin_effect, buddy_buddy_poffin_actions
+from ..library.trainers import (
+    buddy_buddy_poffin_effect,
+    buddy_buddy_poffin_actions,
+    prime_catcher_actions,
+    prime_catcher_effect,
+)
 
 
 # ============================================================================
@@ -194,6 +199,15 @@ SV5_LOGIC = {
             "category": "attack",
             "generator": noctowl_talon_hunt_actions,
             "effect": noctowl_talon_hunt_effect,
+        },
+    },
+
+    # Prime Catcher - Item, ACE SPEC
+    "sv5-157": {
+        "Play Prime Catcher": {
+            "category": "activatable",
+            "generator": prime_catcher_actions,
+            "effect": prime_catcher_effect,
         },
     },
 }
