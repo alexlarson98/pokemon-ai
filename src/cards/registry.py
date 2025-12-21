@@ -28,6 +28,10 @@ _JSON_DATABASE: Dict[str, Dict] = {}
 # Legacy class-based database (deprecated, kept for backwards compatibility)
 _CARD_DATABASE: Dict[str, Type[Card]] = {}
 
+# Card definition cache: Maps card IDs to created Card objects
+# Card definitions are immutable, so caching is safe and provides major speedup
+_CARD_CACHE: Dict[str, 'Card'] = {}
+
 
 def _initialize_registry():
     """
@@ -107,10 +111,17 @@ def create_card(card_id: str) -> Optional[Card]:
         This function creates Card Definition objects (DataDrivenPokemon, etc.),
         not CardInstance objects. Use create_card_instance() for instances.
     """
+    # Check cache first (major speedup for MCTS)
+    if card_id in _CARD_CACHE:
+        return _CARD_CACHE[card_id]
+
     # Load from JSON database
     if card_id in _JSON_DATABASE:
         from cards.factory import create_card_from_json
-        return create_card_from_json(_JSON_DATABASE[card_id])
+        card = create_card_from_json(_JSON_DATABASE[card_id])
+        if card:
+            _CARD_CACHE[card_id] = card
+        return card
 
     # Card not found in database
     return None

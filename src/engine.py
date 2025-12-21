@@ -22,6 +22,7 @@ from models import (
     InterruptPhase,
 )
 from cards import logic_registry
+from fast_clone import fast_clone_game_state
 
 
 class PokemonEngine:
@@ -1869,22 +1870,42 @@ class PokemonEngine:
             New GameState after action application.
         """
         # Clone state for immutability (MCTS requirement)
-        new_state = state.clone()
+        # Using fast_clone for ~10x speedup over Pydantic deep copy
+        new_state = fast_clone_game_state(state)
+        return self._step_inplace(new_state, action)
 
+    def step_inplace(self, state: GameState, action: Action) -> GameState:
+        """
+        Apply action to state IN PLACE (mutates the state).
+
+        Use this for MCTS rollouts where the caller already cloned the state
+        and doesn't need immutability. Much faster than step() since it
+        avoids cloning on each action.
+
+        WARNING: This mutates the input state. Only use when you own the state
+        and don't need to preserve the original.
+
+        Returns:
+            The same state object (mutated).
+        """
+        return self._step_inplace(state, action)
+
+    def _step_inplace(self, state: GameState, action: Action) -> GameState:
+        """Internal step implementation that mutates state in place."""
         # Apply action
-        new_state = self._apply_action(new_state, action)
+        state = self._apply_action(state, action)
 
         # Check for game-ending conditions
-        new_state = self._check_win_conditions(new_state)
+        state = self._check_win_conditions(state)
 
         # Auto-resolve phase transitions if needed
-        if new_state.current_phase == GamePhase.CLEANUP:
-            new_state = self.resolve_phase_transition(new_state)
+        if state.current_phase == GamePhase.CLEANUP:
+            state = self.resolve_phase_transition(state)
 
         # Record move in history
-        new_state.move_history.append(str(action))
+        state.move_history.append(str(action))
 
-        return new_state
+        return state
 
     def _apply_action(self, state: GameState, action: Action) -> GameState:
         """
@@ -4369,6 +4390,9 @@ class PokemonEngine:
         # Check global effects (e.g., "+40 HP to all Grass Pokémon")
         if hasattr(state, 'active_effects') and state.active_effects:
             for effect in state.active_effects:
+                # Only check dict-style effects for HP_MODIFIER
+                if not isinstance(effect, dict):
+                    continue
                 if effect.get('type') == 'HP_MODIFIER':
                     # Check if conditions are met
                     conditions = effect.get('conditions', {})
@@ -4409,6 +4433,9 @@ class PokemonEngine:
         # Check global effects for cost reductions
         if hasattr(state, 'active_effects') and state.active_effects:
             for effect in state.active_effects:
+                # Only check dict-style effects for ATTACK_COST_REDUCTION
+                if not isinstance(effect, dict):
+                    continue
                 if effect.get('type') == 'ATTACK_COST_REDUCTION':
                     # Check if conditions are met
                     conditions = effect.get('conditions', {})

@@ -1302,6 +1302,12 @@ def _get_damage_modifiers_attacker(
 
     # Check active effects for damage modifiers affecting this attacker
     for effect in state.active_effects:
+        # Handle both ActiveEffect objects and legacy dict effects
+        if isinstance(effect, dict):
+            # Dict effects (legacy format) - skip damage modifier checks
+            # These are typically special effects like Briar's prize modifier
+            continue
+
         # Check if effect applies to this attacker
         if effect.target_card_id and effect.target_card_id != attacker.id:
             continue
@@ -1337,6 +1343,11 @@ def _get_damage_modifiers_defender(
 
     # Check active effects for damage reduction affecting this defender
     for effect in state.active_effects:
+        # Handle both ActiveEffect objects and legacy dict effects
+        if isinstance(effect, dict):
+            # Dict effects (legacy format) - skip damage modifier checks
+            continue
+
         # Check if effect applies to this defender
         if effect.target_card_id and effect.target_card_id != defender.id:
             continue
@@ -1374,6 +1385,11 @@ def _has_damage_prevention(state: GameState, pokemon: CardInstance, attacker: Ca
 
     # Check active effects for damage immunity
     for effect in state.active_effects:
+        # Handle both ActiveEffect objects and legacy dict effects
+        if isinstance(effect, dict):
+            # Dict effects (legacy format) - skip damage prevention checks
+            continue
+
         # Check if effect applies to this Pokemon
         if effect.target_card_id and effect.target_card_id != pokemon.id:
             continue

@@ -39,6 +39,7 @@ if src_dir not in sys.path:
 
 from models import GameState, Action, ActionType, GameResult
 from ai.encoder import UniversalActionEncoder, TOTAL_ACTION_SPACE
+from fast_clone import fast_clone_game_state
 
 
 # Context manager to suppress stdout during simulations
@@ -214,7 +215,7 @@ class MCTS:
         self.stats = {'simulations': 0, 'rollout_depths': [], 'terminal_states': 0}
 
         # Create root node
-        root = MCTSNode(state=state.clone())
+        root = MCTSNode(state=fast_clone_game_state(state))
         root.legal_actions = self.engine.get_legal_actions(root.state)
         root.untried_actions = list(root.legal_actions)
 
@@ -305,8 +306,8 @@ class MCTS:
         # Pick an untried action
         action = node.untried_actions.pop()
 
-        # Apply action to get new state
-        new_state = self.engine.step(node.state.clone(), action)
+        # Apply action to get new state (engine.step handles cloning)
+        new_state = self.engine.step(node.state, action)
 
         # Auto-step any forced actions (single legal action states)
         new_state = self._auto_step_forced(new_state)
@@ -375,8 +376,8 @@ class MCTS:
             if len(legal_actions) > 1:
                 break
 
-            # Auto-apply the single forced action
-            state = self.engine.step(state, legal_actions[0])
+            # Auto-apply the single forced action (inplace since state already cloned)
+            state = self.engine.step_inplace(state, legal_actions[0])
             steps += 1
 
         return state
@@ -392,7 +393,8 @@ class MCTS:
         Returns:
             Value from perspective of node's player (+1 win, -1 loss, 0 draw/timeout)
         """
-        state = node.state.clone()
+        # Clone once at start, then mutate in place for speed
+        state = fast_clone_game_state(node.state)
         start_player = node.player_id
         depth = 0
 
@@ -404,13 +406,13 @@ class MCTS:
 
             # Auto-step forced actions without counting toward depth
             if len(legal_actions) == 1:
-                state = self.engine.step(state, legal_actions[0])
+                state = self.engine.step_inplace(state, legal_actions[0])
                 # Don't increment depth for forced actions
                 continue
 
             # Random action selection for actual decisions
             action = random.choice(legal_actions)
-            state = self.engine.step(state, action)
+            state = self.engine.step_inplace(state, action)
             depth += 1
 
         self.stats['rollout_depths'].append(depth)
@@ -453,8 +455,146 @@ class MCTS:
         elif result == GameResult.DRAW:
             return 0.0
         else:
-            # Game not over - return 0 (neutral)
-            return 0.0
+            # Game not over - use heuristic evaluation
+            return self._evaluate_heuristic(state, player_id)
+
+    def _evaluate_heuristic(self, state: GameState, player_id: int) -> float:
+        """
+        Heuristic evaluation of a non-terminal game state.
+
+        Returns a value in [-1, 1] representing how favorable the position
+        is for the specified player. This will be replaced by a neural network
+        in the future.
+
+        Factors considered:
+        - Prize cards remaining (most important - directly measures winning)
+        - Active Pokemon HP percentage
+        - Bench presence and HP
+        - Energy attached (attack readiness)
+        - Evolution stage (higher = more powerful)
+        - Attack damage potential
+
+        Args:
+            state: Current game state
+            player_id: Which player's perspective to evaluate from
+
+        Returns:
+            Heuristic value in [-1, 1]
+        """
+        from cards.factory import create_card
+
+        my_player = state.players[player_id]
+        opp_player = state.players[1 - player_id]
+
+        score = 0.0
+
+        # === PRIZE DIFFERENTIAL (Weight: 0.4) ===
+        # Fewer prizes remaining = closer to winning
+        my_prizes_remaining = len(my_player.prizes.cards)
+        opp_prizes_remaining = len(opp_player.prizes.cards)
+        # Each prize taken is worth ~0.067 (1/6 * 0.4)
+        prize_score = (opp_prizes_remaining - my_prizes_remaining) / 6.0
+        score += prize_score * 0.4
+
+        # === ACTIVE POKEMON (Weight: 0.25) ===
+        active_score = 0.0
+
+        # My active
+        if my_player.board.active_spot:
+            my_active = my_player.board.active_spot
+            my_active_def = create_card(my_active.card_id)
+            if my_active_def:
+                max_hp = my_active_def.hp
+                current_hp = max_hp - (my_active.damage_counters * 10)
+                hp_pct = current_hp / max_hp if max_hp > 0 else 0
+
+                # HP percentage (0-1)
+                active_score += hp_pct * 0.4
+
+                # Evolution stage bonus (basic=0, stage1=0.15, stage2=0.3)
+                stage = getattr(my_active_def, 'stage', 'Basic')
+                if stage == 'Stage 1':
+                    active_score += 0.15
+                elif stage == 'Stage 2':
+                    active_score += 0.3
+
+                # Energy attached (readiness to attack)
+                energy_count = len(my_active.attached_energy)
+                active_score += min(energy_count / 4.0, 0.3) * 0.3
+
+        # Opponent's active (we want them weak)
+        if opp_player.board.active_spot:
+            opp_active = opp_player.board.active_spot
+            opp_active_def = create_card(opp_active.card_id)
+            if opp_active_def:
+                max_hp = opp_active_def.hp
+                current_hp = max_hp - (opp_active.damage_counters * 10)
+                hp_pct = current_hp / max_hp if max_hp > 0 else 0
+
+                # Opponent low HP is good for us
+                active_score += (1.0 - hp_pct) * 0.3
+
+        score += active_score * 0.25
+
+        # === BENCH PRESENCE (Weight: 0.2) ===
+        bench_score = 0.0
+
+        # My bench
+        my_bench = [p for p in my_player.board.bench if p is not None]
+        my_bench_count = len(my_bench)
+        bench_score += min(my_bench_count / 5.0, 1.0) * 0.4  # Up to 5 bench = full score
+
+        # Bench HP and evolution
+        for pokemon in my_bench:
+            poke_def = create_card(pokemon.card_id)
+            if poke_def:
+                max_hp = poke_def.hp
+                current_hp = max_hp - (pokemon.damage_counters * 10)
+                hp_pct = current_hp / max_hp if max_hp > 0 else 0
+                bench_score += hp_pct * 0.05  # Small bonus per healthy benched Pokemon
+
+                # Evolution bonus
+                stage = getattr(poke_def, 'stage', 'Basic')
+                if stage == 'Stage 1':
+                    bench_score += 0.03
+                elif stage == 'Stage 2':
+                    bench_score += 0.06
+
+        # Opponent bench (fewer = better for us)
+        opp_bench = [p for p in opp_player.board.bench if p is not None]
+        opp_bench_count = len(opp_bench)
+        bench_score += (5 - min(opp_bench_count, 5)) / 5.0 * 0.2
+
+        score += bench_score * 0.2
+
+        # === ATTACK POTENTIAL (Weight: 0.15) ===
+        attack_score = 0.0
+
+        if my_player.board.active_spot:
+            my_active = my_player.board.active_spot
+            my_active_def = create_card(my_active.card_id)
+            if my_active_def and hasattr(my_active_def, 'attacks'):
+                # Check if we can attack and for how much damage
+                max_damage = 0
+                for attack in (my_active_def.attacks or []):
+                    if hasattr(attack, 'damage'):
+                        damage = attack.damage
+                        if isinstance(damage, str):
+                            # Parse damage like "120" or "30x"
+                            damage = damage.replace('+', '').replace('x', '').replace('×', '')
+                            try:
+                                damage = int(damage) if damage else 0
+                            except ValueError:
+                                damage = 0
+                        max_damage = max(max_damage, damage or 0)
+
+                # Normalize damage (200+ damage = max score)
+                attack_score = min(max_damage / 200.0, 1.0)
+
+        score += attack_score * 0.15
+
+        # Clamp to [-1, 1]
+        return max(-1.0, min(1.0, score))
 
     def _backpropagate(self, node: MCTSNode, value: float) -> None:
         """

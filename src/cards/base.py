@@ -19,12 +19,17 @@ NEW: Data-Driven Factory Pattern
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, TYPE_CHECKING, Callable
 from enum import Enum
+from collections import namedtuple
 
 # Avoid circular imports
 if TYPE_CHECKING:
     from models import GameState, CardInstance, Action, Zone, PlayerState
 
 from models import EnergyType, Subtype, ActionType
+
+# Pre-defined namedtuples for attacks and abilities (avoid creating in hot paths)
+Attack = namedtuple('Attack', ['name', 'cost', 'converted_energy_cost', 'damage', 'text'])
+Ability = namedtuple('Ability', ['name', 'text', 'type', 'category', 'is_activatable'])
 
 
 # ============================================================================
@@ -903,9 +908,6 @@ class DataDrivenPokemon(PokemonCard):
 
         Returns a list of attack objects with name and cost attributes.
         """
-        from collections import namedtuple
-        Attack = namedtuple('Attack', ['name', 'cost', 'converted_energy_cost', 'damage', 'text'])
-
         attacks = []
         for attack_data in self.json_data.get('attacks', []):
             # Parse cost
@@ -945,10 +947,6 @@ class DataDrivenPokemon(PokemonCard):
 
         The 'is_activatable' field is kept for backwards compatibility.
         """
-        from collections import namedtuple
-
-        Ability = namedtuple('Ability', ['name', 'text', 'type', 'category', 'is_activatable'])
-
         abilities = []
         for ability_data in self.json_data.get('abilities', []):
             name = ability_data.get('name', '')
