@@ -51,6 +51,7 @@ def charmander_blazing_destruction_effect(state: GameState, card: CardInstance, 
     Execute Charmander's "Blazing Destruction" attack effect.
 
     Discards the Stadium card currently in play (if any).
+    Uses the discard_stadium helper to properly trigger on_stadium_leave hooks.
 
     Args:
         state: Current game state
@@ -60,14 +61,10 @@ def charmander_blazing_destruction_effect(state: GameState, card: CardInstance, 
     Returns:
         Modified GameState
     """
-    # Check if there's a Stadium in play
-    if state.stadium:
-        # Determine which player owns the stadium to discard to correct discard pile
-        stadium_owner = state.get_player(state.stadium.owner_id)
+    from actions import discard_stadium
 
-        # Discard the stadium
-        stadium_owner.discard.add_card(state.stadium)
-        state.stadium = None
+    # Discard the stadium (triggers on_stadium_leave hooks)
+    state = discard_stadium(state)
 
     return state
 

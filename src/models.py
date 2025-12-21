@@ -539,6 +539,7 @@ class SelectionPurpose(str, Enum):
     SWITCH_TARGET = "switch_target"             # Selecting Pokemon to switch in (Boss's Orders)
     RECOVER_TO_DECK = "recover_to_deck"         # Recovering cards from discard to deck (Super Rod)
     RECOVER_TO_HAND = "recover_to_hand"         # Recovering cards from discard to hand (Night Stretcher)
+    DISCARD_FROM_PLAY = "discard_from_play"     # Discarding Pokemon from bench (Area Zero Underdepths)
 
 
 class ZoneType(str, Enum):
@@ -814,6 +815,7 @@ class ActionType(str, Enum):
     # Reactions
     TAKE_PRIZE = "take_prize"
     PROMOTE_ACTIVE = "promote_active"
+    DISCARD_BENCH = "discard_bench"  # Discard a Pokemon from bench (Area Zero Underdepths effect)
 
     # Interrupt Stack Actions (LEGACY - kept for backward compatibility)
     SEARCH_SELECT_COUNT = "search_select_count"   # Select how many cards to search (upfront count selection)

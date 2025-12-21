@@ -10,6 +10,7 @@ from models import (
 )
 from actions import apply_damage, calculate_damage, coin_flip_multiple
 from cards.library.trainers import briar_actions, briar_effect
+from cards.library.stadiums import area_zero_underdepths_on_leave_hook
 
 # Import Noctowl Version 1 from svp (reprint)
 from .svp import (
@@ -155,7 +156,7 @@ def fan_rotom_fan_call_actions(state: GameState, card: CardInstance, player: Pla
         player_id=player.player_id,
         card_id=card.id,
         ability_name="Fan Call",
-        display_label="Fan Call - Search up to 3 Colorless Pokemon (HP ≤ 100)"
+        display_label="Fan Call - Search up to 3 Colorless Pokemon (HP <= 100)"
     )]
 
 
@@ -371,6 +372,24 @@ SV7_LOGIC = {
             "category": "activatable",
             "generator": briar_actions,
             "effect": briar_effect,
+        },
+    },
+
+    # Area Zero Underdepths - Stadium (8-bench for Tera Pokemon)
+    # The bench size increase is an intrinsic state handled by the engine's update_bench_sizes()
+    # Only the leave hook is needed (for discarding down to 5 when stadium leaves)
+    "sv7-131": {
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
+        },
+    },
+    "sv7-174": {
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
         },
     },
 }

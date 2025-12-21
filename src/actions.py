@@ -1599,3 +1599,101 @@ def get_all_attached_energy(
                 all_energy.append(energy_card)
 
     return all_energy
+
+
+# ============================================================================
+# 10. STADIUM MANIPULATION
+# ============================================================================
+
+def discard_stadium(state: GameState) -> GameState:
+    """
+    Properly discard the current stadium, triggering on_stadium_leave hooks.
+
+    This function ensures that stadium-leave effects (like Area Zero Underdepths'
+    bench discard requirement) are properly triggered when a stadium is discarded
+    by any means (attacks, abilities, etc).
+
+    Args:
+        state: Current game state
+
+    Returns:
+        Modified GameState with stadium discarded and hooks triggered
+
+    Usage:
+        # In an attack effect that discards a stadium:
+        from actions import discard_stadium
+        state = discard_stadium(state)
+    """
+    if state.stadium is None:
+        return state
+
+    stadium = state.stadium
+    stadium_owner = state.get_player(stadium.owner_id)
+
+    # Trigger on_stadium_leave hooks BEFORE discarding
+    from cards.logic_registry import MASTER_LOGIC_REGISTRY
+
+    card_logic = MASTER_LOGIC_REGISTRY.get(stadium.card_id)
+    if card_logic and isinstance(card_logic, dict):
+        for ability_name, ability_data in card_logic.items():
+            if isinstance(ability_data, dict):
+                category = ability_data.get('category')
+                trigger = ability_data.get('trigger')
+
+                if category == 'hook' and trigger == 'on_stadium_leave':
+                    hook_fn = ability_data.get('effect')
+                    if hook_fn:
+                        state = hook_fn(state, stadium)
+
+    # Discard the stadium to its owner's discard pile
+    stadium_owner.discard.add_card(stadium)
+    state.stadium = None
+
+    return state
+
+
+def discard_pokemon_from_play(
+    state: GameState,
+    pokemon: CardInstance,
+    player: 'PlayerState'
+) -> GameState:
+    """
+    Properly discard a Pokemon from play, including all attached cards and evolution stages.
+
+    This function handles the complete discard of a Pokemon, ensuring:
+    1. All attached energy goes to discard
+    2. All attached tools go to discard
+    3. All previous evolution stages (stored in previous_stages) go to discard
+    4. The Pokemon itself goes to discard
+
+    Args:
+        state: Current game state
+        pokemon: The Pokemon CardInstance being discarded
+        player: The PlayerState of the Pokemon's owner
+
+    Returns:
+        Modified GameState with all cards properly discarded
+
+    Note:
+        This function does NOT remove the Pokemon from the board - the caller
+        must do that separately (via board.remove_from_bench() etc).
+    """
+    # Discard all attached energy
+    for energy in pokemon.attached_energy:
+        player.discard.add_card(energy)
+    pokemon.attached_energy = []
+
+    # Discard all attached tools
+    for tool in pokemon.attached_tools:
+        player.discard.add_card(tool)
+    pokemon.attached_tools = []
+
+    # Discard all previous evolution stages
+    for previous_stage in pokemon.previous_stages:
+        player.discard.add_card(previous_stage)
+    pokemon.previous_stages = []
+
+    # Discard the Pokemon itself
+    player.discard.add_card(pokemon)
+
+    return state

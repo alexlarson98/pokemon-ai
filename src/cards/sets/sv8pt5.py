@@ -47,6 +47,7 @@ from cards.library.trainers import (
     prime_catcher_actions,
     prime_catcher_effect,
 )
+from cards.library.stadiums import area_zero_underdepths_on_leave_hook
 
 
 # ============================================================================
@@ -311,6 +312,17 @@ SV8PT5_LOGIC = {
             "category": "activatable",
             "generator": prime_catcher_actions,
             "effect": prime_catcher_effect,
+        },
+    },
+
+    # Area Zero Underdepths - Stadium (8-bench for Tera Pokemon)
+    # The bench size increase is an intrinsic state handled by the engine's update_bench_sizes()
+    # Only the leave hook is needed (for discarding down to 5 when stadium leaves)
+    "sv8pt5-94": {
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
         },
     },
 }

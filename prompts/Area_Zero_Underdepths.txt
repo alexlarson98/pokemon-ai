@@ -1,0 +1,148 @@
+# Area Zero Underdepths Implementation
+
+Implement this card using the **Unified Ability Schema** and **Stack Architecture** (when applicable).
+
+## Architecture Overview
+
+### Unified Ability Schema
+Every attack/ability is registered under its exact name with a `category` field:
+- **attack**: Deals damage, has energy cost, generates actions
+- **activatable**: Player-triggered ability, generates actions
+- **passive**: Conditional continuous effect ("as long as...", "while...") - checked by engine
+- **modifier**: Continuously modifies values (retreat cost, damage, HP)
+- **guard**: Blocks effects/conditions (status, damage, trainer cards)
+- **hook**: Event-triggered (on_play, on_knockout, etc.)
+
+### Multi-Effect Abilities
+When an ability has multiple effects, use suffixed entries:
+```python
+"Ability Name (Passive)": {"category": "passive", ...},
+"Ability Name (Modifier)": {"category": "modifier", ...},
+"Ability Name (Guard)": {"category": "guard", ...},
+```
+
+### Stack Architecture (for multi-step effects)
+Use when effects require sequential decisions or costs:
+- **SearchDeckStep**: Search deck for cards matching filter criteria
+- **SelectFromZoneStep**: Select cards from hand/bench/board with filters
+- Push steps onto `state.push_step(step)` - they resolve in LIFO order
+- Use `on_complete_callback` for chaining steps
+
+### Registry Structure
+- **Pokemon Attacks/Abilities:** Use the exact name as the dictionary key.
+- **Trainers:** Use `"Play CardName": {"category": "activatable", ...}`.
+
+## Version 1
+
+**Card IDs:** sv7-131, sv7-174 | **Type:** Trainer (Stadium) | **HP:** N/A
+
+### Feature: play (ACTION)
+_Each player who has any Tera Pokemon in play can have up to 8 Pokemon on their Bench.    If a player no longer has any Tera Pokemon in play, that player discards Pokemon from their Bench until they have 5. When this card leaves play, both players discard Pokemon from their Bench until they have 5, and the player who played this card discards first. You may play only 1 Stadium card during your turn. Put it next to the Active Spot, and discard it if another Stadium comes into play. A Stadium with the same name can't be played._
+
+- Implement `area_zero_underdepths_actions(state, card, player)` (Generator)
+- Implement `area_zero_underdepths_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `DISCARD_FROM_BENCH`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)`
+
+### Feature: Area Zero Underdepths (Leave) (HOOK)
+_Triggered when this Stadium leaves play._
+
+- Implement `area_zero_underdepths_on_leave_hook(state, stadium)` (On Stadium Leave Hook)
+  - Called when this Stadium is replaced or discarded
+
+**Stack Architecture Required** (Pattern: `DISCARD_FROM_BENCH`)
+Resolution Steps:
+  - `SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)`
+
+### Registry (`sv7.py`)
+```python
+SV7_LOGIC = {
+    "sv7-131": {
+        "Play Area Zero Underdepths": {
+            "category": "activatable",
+            "generator": area_zero_underdepths_actions,
+            "effect": area_zero_underdepths_effect,
+        },
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
+        },
+    },
+    "sv7-174": {
+        "Play Area Zero Underdepths": {
+            "category": "activatable",
+            "generator": area_zero_underdepths_actions,
+            "effect": area_zero_underdepths_effect,
+        },
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
+        },
+    },
+}
+```
+
+## Version 2
+
+**Card IDs:** sv8pt5-94 | **Type:** Trainer (Stadium) | **HP:** N/A
+
+### Feature: play (ACTION)
+_Each player who has any Tera Pokemon in play can have up to 8 Pokemon on their Bench.  If a player no longer has any Tera Pokemon in play, that player discards Pokemon from their Bench until they have 5. When this card leaves play, both players discard Pokemon from their Bench until they have 5, and the player who played this card discards first. You may play only 1 Stadium card during your turn. Put it next to the Active Spot, and discard it if another Stadium comes into play. A Stadium with the same name can't be played._
+
+- Implement `area_zero_underdepths_actions(state, card, player)` (Generator)
+- Implement `area_zero_underdepths_effect(state, card, action)` (Effect)
+
+**Stack Architecture Required** (Pattern: `DISCARD_FROM_BENCH`)
+The effect function should push resolution steps onto the stack:
+```python
+def effect(state, card, action):
+    from models import SearchDeckStep, SelectFromZoneStep, ZoneType, SelectionPurpose
+    # Push steps in reverse order (LIFO)
+    # SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)
+    state.push_step(step)
+    return state
+```
+Resolution Steps:
+  - `SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)`
+
+### Feature: Area Zero Underdepths (Leave) (HOOK)
+_Triggered when this Stadium leaves play._
+
+- Implement `area_zero_underdepths_on_leave_hook(state, stadium)` (On Stadium Leave Hook)
+  - Called when this Stadium is replaced or discarded
+
+**Stack Architecture Required** (Pattern: `DISCARD_FROM_BENCH`)
+Resolution Steps:
+  - `SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)`
+
+### Registry (`sv8pt5.py`)
+```python
+SV8PT5_LOGIC = {
+    "sv8pt5-94": {
+        "Play Area Zero Underdepths": {
+            "category": "activatable",
+            "generator": area_zero_underdepths_actions,
+            "effect": area_zero_underdepths_effect,
+        },
+        "Area Zero Underdepths (Leave)": {
+            "category": "hook",
+            "trigger": "on_stadium_leave",
+            "effect": area_zero_underdepths_on_leave_hook,
+        },
+    },
+}
+```
+

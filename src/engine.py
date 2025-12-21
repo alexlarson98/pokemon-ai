@@ -131,18 +131,20 @@ class PokemonEngine:
             return actions
 
         # INTERRUPT 2: Bench size collapse (Constitution Section 4.3)
-        max_bench = self.get_max_bench_size(state, player)
-        if player.board.get_bench_count() > max_bench:
-            # Player must discard Pokémon until bench size is valid
-            for i, pokemon in enumerate(player.board.bench):
-                if pokemon is not None:
-                    actions.append(Action(
-                        action_type=ActionType.PROMOTE_ACTIVE,  # Reusing for discard
-                        player_id=player.player_id,
-                        card_id=pokemon.id,
-                        metadata={"discard_to_fix_bench": True, "bench_index": i}
-                    ))
-            return actions
+        # Check BOTH players for bench collapse, active player first
+        for check_player in [player, state.get_opponent()]:
+            max_bench = self.get_max_bench_size(state, check_player)
+            if check_player.board.get_bench_count() > max_bench:
+                # Player must discard Pokémon until bench size is valid
+                for i, pokemon in enumerate(check_player.board.bench):
+                    if pokemon is not None:
+                        actions.append(Action(
+                            action_type=ActionType.DISCARD_BENCH,
+                            player_id=check_player.player_id,
+                            card_id=pokemon.id,
+                            metadata={"bench_index": i}
+                        ))
+                return actions
 
         return []
 
@@ -1918,6 +1920,8 @@ class PokemonEngine:
             return self._apply_attack(state, action)
         elif action.action_type == ActionType.PROMOTE_ACTIVE:
             return self._apply_promote_active(state, action)
+        elif action.action_type == ActionType.DISCARD_BENCH:
+            return self._apply_discard_bench(state, action)
         elif action.action_type == ActionType.END_TURN:
             return self._apply_end_turn(state, action)
         # Interrupt Stack Actions
@@ -1963,6 +1967,8 @@ class PokemonEngine:
 
         if card:
             player.board.add_to_bench(card)
+            # Update bench sizes in case a Tera Pokemon was placed
+            state = self.update_bench_sizes(state)
 
         return state
 
@@ -2078,6 +2084,9 @@ class PokemonEngine:
             card.turns_in_play = 0  # Reset for evolution sickness
             player.board.add_to_bench(card)
 
+            # Update bench sizes in case a Tera Pokemon was placed
+            state = self.update_bench_sizes(state)
+
             # Check for "on_play_pokemon" triggers (4 Pillars: Hooks)
             # This allows cards like Flamigo's Insta-Flock to activate
             triggered_actions = self._check_triggers(state, "on_play_pokemon", {
@@ -2157,18 +2166,106 @@ class PokemonEngine:
         return state
 
     def _apply_play_stadium(self, state: GameState, action: Action) -> GameState:
-        """Play Stadium card."""
+        """
+        Play Stadium card.
+
+        Stadium Rules:
+        1. Discard the old stadium (if any) to its owner's discard pile
+        2. Trigger on_stadium_leave hooks for the old stadium
+        3. Place the new stadium
+        4. Trigger on_stadium_play hooks for the new stadium
+
+        Args:
+            state: Current game state
+            action: Play stadium action
+
+        Returns:
+            Modified GameState
+        """
         player = state.get_player(action.player_id)
         card = player.hand.remove_card(action.card_id)
 
         if card:
             # Discard old stadium if exists
             if state.stadium is not None:
-                # TODO: Determine owner and move to their discard
-                pass
+                old_stadium = state.stadium
+                old_owner = state.get_player(old_stadium.owner_id)
 
+                # Trigger on_stadium_leave hooks before discarding
+                state = self._trigger_stadium_leave(state, old_stadium)
+
+                # Move old stadium to its owner's discard pile
+                old_owner.discard.add_card(old_stadium)
+
+            # Place new stadium
             state.stadium = card
             player.stadium_played_this_turn = True
+
+            # Update bench sizes for all players (stadium may affect max bench)
+            state = self.update_bench_sizes(state)
+
+            # Trigger on_stadium_play hooks
+            state = self._trigger_stadium_play(state, card, action)
+
+        return state
+
+    def _trigger_stadium_leave(self, state: GameState, stadium: CardInstance) -> GameState:
+        """
+        Trigger effects when a stadium leaves play.
+
+        Some stadiums (like Area Zero Underdepths) have special effects
+        when they leave play that need to be resolved.
+
+        Args:
+            state: Current game state
+            stadium: Stadium that is leaving play
+
+        Returns:
+            Modified GameState
+        """
+        from cards.logic_registry import MASTER_LOGIC_REGISTRY
+
+        # Check for on_leave hook in logic registry
+        card_logic = MASTER_LOGIC_REGISTRY.get(stadium.card_id)
+        if card_logic and isinstance(card_logic, dict):
+            for ability_name, ability_data in card_logic.items():
+                if isinstance(ability_data, dict):
+                    category = ability_data.get('category')
+                    trigger = ability_data.get('trigger')
+
+                    if category == 'hook' and trigger == 'on_stadium_leave':
+                        hook_fn = ability_data.get('effect')
+                        if hook_fn:
+                            state = hook_fn(state, stadium)
+
+        return state
+
+    def _trigger_stadium_play(self, state: GameState, stadium: CardInstance, action: Action) -> GameState:
+        """
+        Trigger effects when a stadium is played.
+
+        Applies the stadium's effect function if one exists.
+
+        Args:
+            state: Current game state
+            stadium: Stadium that was played
+            action: Play action
+
+        Returns:
+            Modified GameState
+        """
+        from cards.logic_registry import MASTER_LOGIC_REGISTRY
+
+        # Check for effect function in logic registry
+        card_logic = MASTER_LOGIC_REGISTRY.get(stadium.card_id)
+        if card_logic and isinstance(card_logic, dict):
+            # Look for "Play CardName" entry
+            for ability_name, ability_data in card_logic.items():
+                if isinstance(ability_data, dict) and ability_name.startswith("Play "):
+                    effect_fn = ability_data.get('effect')
+                    if effect_fn:
+                        state = effect_fn(state, stadium, action)
+                    break
 
         return state
 
@@ -2437,15 +2534,28 @@ class PokemonEngine:
         """Promote Pokémon from Bench to Active (after KO)."""
         player = state.get_player(action.player_id)
 
-        # Handle bench discard (Section 4.3)
-        if action.metadata.get("discard_to_fix_bench", False):
-            pokemon = player.board.remove_from_bench(action.card_id)
-            if pokemon:
-                player.discard.add_card(pokemon)
-        else:
-            # Normal promotion
-            new_active = player.board.remove_from_bench(action.card_id)
-            player.board.active_spot = new_active
+        # Normal promotion
+        new_active = player.board.remove_from_bench(action.card_id)
+        player.board.active_spot = new_active
+
+        return state
+
+    def _apply_discard_bench(self, state: GameState, action: Action) -> GameState:
+        """
+        Discard Pokémon from Bench (bench collapse, e.g., Area Zero Underdepths).
+
+        This properly discards the Pokemon including all attached cards and
+        evolution stages.
+        """
+        from actions import discard_pokemon_from_play
+
+        player = state.get_player(action.player_id)
+
+        # Remove from bench
+        pokemon = player.board.remove_from_bench(action.card_id)
+        if pokemon:
+            # Use the helper to properly discard with all attached cards and evolutions
+            state = discard_pokemon_from_play(state, pokemon, player)
 
         return state
 
@@ -2886,6 +2996,9 @@ class PokemonEngine:
             for card in selected_cards:
                 card.turns_in_play = 0
                 player.board.add_to_bench(card)
+            # Update bench sizes in case Tera Pokemon was placed
+            if selected_cards:
+                state = self.update_bench_sizes(state)
 
         elif step.destination == ZoneType.DISCARD:
             for card in selected_cards:
@@ -3219,6 +3332,24 @@ class PokemonEngine:
 
                     if old_active:
                         player.board.bench.append(old_active)
+
+        elif callback == "area_zero_discard_bench":
+            # Discard selected Pokemon from bench (Area Zero Underdepths effect)
+            from actions import discard_pokemon_from_play
+
+            player = state.get_player(completed_step.player_id)
+
+            if completed_step.selected_card_ids:
+                for card_id in completed_step.selected_card_ids:
+                    # Find and remove from bench
+                    discarded_pokemon = player.board.remove_from_bench(card_id)
+
+                    if discarded_pokemon:
+                        # Use helper to properly discard with all attached cards and evolutions
+                        state = discard_pokemon_from_play(state, discarded_pokemon, player)
+
+                # Update bench sizes after discarding Pokemon
+                state = self.update_bench_sizes(state)
 
         return state
 
@@ -3744,6 +3875,9 @@ class PokemonEngine:
         else:
             owner.board.remove_from_bench(knocked_out.id)
 
+        # Update bench sizes (may need to enforce discard if Tera Pokemon was KO'd)
+        state = self.update_bench_sizes(state)
+
         # Award prizes with multi-source modifiers
         # Architecture Fix: Checks victim, killer, and global effects (Briar, Iron Hands ex, etc.)
         num_prizes = self._calculate_prizes(killer, knocked_out, state)
@@ -3826,6 +3960,9 @@ class PokemonEngine:
         else:
             owner.board.remove_from_bench(pokemon.id)
 
+        # Update bench sizes (may need to enforce discard if Tera Pokemon was returned)
+        state = self.update_bench_sizes(state)
+
         return state
 
     def devolve_pokemon(self, state: GameState, pokemon: CardInstance, owner: PlayerState) -> GameState:
@@ -3906,11 +4043,7 @@ class PokemonEngine:
         Get maximum bench size for a player.
 
         Default: 5 (base rule)
-        Modifiers applied from active_effects (e.g., Stadium cards like Area Zero Underdepths)
-
-        Architecture: This function is now extensible - Stadium card logic
-        (like Area Zero Underdepths) is handled via card-specific logic in the registry,
-        not hardcoded string checks.
+        Stadium effects like Area Zero Underdepths can modify this dynamically.
 
         Args:
             state: Current game state
@@ -3919,30 +4052,27 @@ class PokemonEngine:
         Returns:
             Maximum number of Pokémon allowed on bench
         """
-        base_size = 5
+        # Import here to avoid circular dependency
+        from cards.library.stadiums import get_max_bench_size_for_player
 
-        # Check for bench size modifiers in active effects
-        # Future: Stadium cards will register effects via logic_registry
-        # Example: Area Zero Underdepths sets BENCH_SIZE_MODIFIER effect
+        # Delegate to the stadium library's function which handles
+        # Area Zero Underdepths and Tera Pokemon checks
+        return get_max_bench_size_for_player(state, player.player_id)
 
-        if hasattr(state, 'active_effects') and state.active_effects:
-            for effect in state.active_effects:
-                if effect.get('type') == 'BENCH_SIZE_MODIFIER':
-                    # Check if conditions are met (e.g., has_tera for Area Zero)
-                    conditions = effect.get('conditions', {})
+    def update_bench_sizes(self, state: GameState) -> GameState:
+        """
+        Recalculate and update max_bench_size for all players.
 
-                    # Example condition: requires Tera Pokémon in play
-                    if conditions.get('requires_tera', False):
-                        has_tera = any(
-                            Subtype.TERA in self._get_card_subtypes(pokemon)
-                            for pokemon in player.board.get_all_pokemon()
-                        )
-                        if has_tera:
-                            modifier = effect.get('modifier', 0)
-                            base_size += modifier
-                            break
+        Called when:
+        - A stadium is played or removed
+        - A Pokemon is placed on the board (could be Tera)
+        - A Pokemon is removed from the board
 
-        return base_size
+        This ensures board.max_bench_size is always the source of truth.
+        """
+        for player in state.players:
+            player.board.max_bench_size = self.get_max_bench_size(state, player)
+        return state
 
     def calculate_retreat_cost(self, state: GameState, pokemon: CardInstance) -> int:
         """
