@@ -50,6 +50,8 @@ from ai.encoder import TOTAL_ACTION_SPACE
 @contextlib.contextmanager
 def suppress_stdout():
     """Temporarily suppress stdout (for clean output)."""
+    # Flush any pending output before suppressing to prevent lost/reordered output
+    sys.stdout.flush()
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()
     try:
@@ -139,16 +141,25 @@ class GameHistory:
         samples = []
 
         for step in self.steps:
+
+            # Calculate a "Time Penalty"
+            # Example: -0.002 per turn.
+            # A win at Turn 20 = 1.0 - (0.04) = 0.96
+            # A win at Turn 100 = 1.0 - (0.20) = 0.80
+            # The AI will fight for that extra 0.16 points by winning faster.
+            penalty = step.turn_number * 0.002
+
             # Assign value target based on winner
             if winner_id is None:
                 # Draw
                 value_target = 0.0
             elif step.player_id == winner_id:
                 # This player won
-                value_target = 1.0
+                value_target = 1.0 - penalty
             else:
                 # This player lost
-                value_target = -1.0
+                value_target = -1.0 + penalty
+
 
             samples.append((
                 step.state_dict,
@@ -288,7 +299,7 @@ class SelfPlayWorker:
 
             if not legal_actions:
                 if self.verbose:
-                    print(f"  Turn {state.turn_count}: No legal actions, ending game")
+                    print(f"  Turn {state.turn_count}: No legal actions, ending game", flush=True)
                 break
 
             # Skip storing for forced moves (only one legal action)
@@ -299,7 +310,8 @@ class SelfPlayWorker:
                     action_str = str(forced_action)
                     if len(action_str) > 60:
                         action_str = action_str[:57] + "..."
-                    print(f"  T{state.turn_count:3d} P{state.active_player_index}: {action_str} (forced)")
+                    print(f"  T{state.turn_count:3d} P{state.active_player_index}: {action_str} (forced)", flush=True)
+
                 # Just apply the forced action (suppress engine output)
                 with suppress_stdout():
                     state = self.engine.step_inplace(state, forced_action)
@@ -310,7 +322,7 @@ class SelfPlayWorker:
                 action, action_probs, info = mcts.search(state, add_noise=True)
             except ValueError as e:
                 if self.verbose:
-                    print(f"  Turn {state.turn_count}: MCTS error: {e}")
+                    print(f"  Turn {state.turn_count}: MCTS error: {e}", flush=True)
                 break
 
             # Encode current state for storage
@@ -330,7 +342,7 @@ class SelfPlayWorker:
                 # Truncate long action strings
                 if len(action_str) > 60:
                     action_str = action_str[:57] + "..."
-                print(f"  T{state.turn_count:3d} P{state.active_player_index}: {action_str} (wr: {info.get('win_rate', 0):.0%})")
+                print(f"  T{state.turn_count:3d} P{state.active_player_index}: {action_str} (wr: {info.get('win_rate', 0):.0%})", flush=True)
 
             # Apply action (suppress engine output)
             with suppress_stdout():

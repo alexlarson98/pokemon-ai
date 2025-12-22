@@ -1008,7 +1008,7 @@ def evolve_pokemon(
                     "trigger_card": pokemon,
                     "trigger_player_id": p.player_id
                 }
-                hook(state, pokemon, hook_context)
+                state = hook(state, pokemon, hook_context)
         # Check bench
         for bench_pokemon in p.board.bench:
             if bench_pokemon:
@@ -1026,7 +1026,7 @@ def evolve_pokemon(
                         "trigger_card": bench_pokemon,
                         "trigger_player_id": p.player_id
                     }
-                    hook(state, bench_pokemon, hook_context)
+                    state = hook(state, bench_pokemon, hook_context)
 
     return state
 

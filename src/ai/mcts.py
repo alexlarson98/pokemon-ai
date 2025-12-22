@@ -53,6 +53,8 @@ from fast_clone import fast_clone_game_state
 @contextlib.contextmanager
 def suppress_stdout():
     """Temporarily suppress stdout (for clean simulations)."""
+    # Flush any pending output before suppressing to prevent lost/reordered output
+    sys.stdout.flush()
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()
     try:
@@ -221,12 +223,12 @@ class MCTS:
         action_probs = self._get_action_probabilities(root)
 
         # Select action based on temperature
-        best_action = self._select_action(root, action_probs)
+        selected_action, selected_action_index = self._select_action(root, action_probs)
 
-        # Gather statistics
-        info = self._gather_info(root)
+        # Gather statistics (pass selected action AND index to get correct logging)
+        info = self._gather_info(root, selected_action, selected_action_index)
 
-        return best_action, action_probs, info
+        return selected_action, action_probs, info
 
     def _simulate(self, root: MCTSNode) -> None:
         """
@@ -541,7 +543,7 @@ class MCTS:
         self,
         root: MCTSNode,
         action_probs: np.ndarray
-    ) -> Action:
+    ) -> Tuple[Action, int]:
         """
         Select action to play based on visit count probabilities.
 
@@ -550,12 +552,12 @@ class MCTS:
             action_probs: Action probabilities from visit counts
 
         Returns:
-            Selected action
+            Tuple of (selected_action, action_index) for reliable child lookup
         """
         if self.temperature == 0:
             # Greedy selection
             best_child = max(root.children.values(), key=lambda c: c.visit_count)
-            return best_child.action
+            return best_child.action, best_child.action_index
         else:
             # Sample from probability distribution
             action_indices = list(root.children.keys())
@@ -571,10 +573,17 @@ class MCTS:
             chosen_idx = np.random.choice(len(action_indices), p=probs)
             chosen_action_index = action_indices[chosen_idx]
 
-            return root.children[chosen_action_index].action
+            return root.children[chosen_action_index].action, chosen_action_index
 
-    def _gather_info(self, root: MCTSNode) -> Dict[str, Any]:
-        """Gather statistics about the search for debugging/display."""
+    def _gather_info(self, root: MCTSNode, selected_action: Action, selected_action_index: int) -> Dict[str, Any]:
+        """
+        Gather statistics about the search for debugging/display.
+
+        Args:
+            root: Root node after search
+            selected_action: The action that was actually selected
+            selected_action_index: The encoder index of the selected action (for reliable lookup)
+        """
         visit_counts = {}
         values = {}
 
@@ -588,21 +597,29 @@ class MCTS:
             else:
                 values[action_str] = child.value
 
-        # Find best action by visit count
-        best_child = max(root.children.values(), key=lambda c: c.visit_count)
-        best_action_str = self._format_action(best_child.action)
-        best_value = values.get(best_action_str, 0.0)
-        best_visits = best_child.visit_count
+        # Get the selected child directly by index (reliable lookup)
+        selected_child = root.children.get(selected_action_index)
 
-        # Calculate win rate (value is in [-1, 1], convert to [0, 1])
-        win_rate = (best_value + 1.0) / 2.0
+        # Format the SELECTED action (not the most-visited one)
+        # This ensures logging matches what's actually executed
+        selected_action_str = self._format_action(selected_action)
+
+        if selected_child:
+            selected_value = values.get(selected_action_str, 0.0)
+            selected_visits = selected_child.visit_count
+        else:
+            selected_value = 0.0
+            selected_visits = 0
+
+        # Calculate win rate for selected action (value is in [-1, 1], convert to [0, 1])
+        win_rate = (selected_value + 1.0) / 2.0
 
         return {
             'visit_counts': visit_counts,
             'values': values,
-            'best_action_str': best_action_str,
-            'best_value': best_value,
-            'best_visits': best_visits,
+            'best_action_str': selected_action_str,  # Shows SELECTED action, not most-visited
+            'best_value': selected_value,
+            'best_visits': selected_visits,
             'win_rate': win_rate,
             'simulations': self.stats['simulations'],
             'nn_evaluations': self.stats['nn_evaluations'],
