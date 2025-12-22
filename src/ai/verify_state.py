@@ -30,7 +30,7 @@ from ai.state_encoder import (
     encode_state, get_global_registry, set_global_registry,
     get_input_shapes, get_pokemon_feature_names, get_global_feature_names,
     MAX_HAND_SIZE, MAX_BENCH_SIZE, MAX_DISCARD_SIZE, MAX_PRIZES,
-    POKEMON_FEATURES, HAND_FEATURES, GLOBAL_FEATURES, STADIUM_FEATURES,
+    POKEMON_FEATURES, GLOBAL_FEATURES, STADIUM_FEATURES,
 )
 
 
@@ -159,39 +159,48 @@ class StateEncoderVerifier:
 
         return errors
 
-    def verify_hand_card_types(self) -> list:
-        """Verify hand cards have correct type flags."""
+    def verify_hand_ids(self) -> list:
+        """Verify hand is encoded as flat array of card IDs."""
         errors = []
         state = self._create_test_state()
 
         p0 = state.players[0]
         p0.hand.cards.clear()
-        p0.hand.add_card(create_card_instance('sv3pt5-4', owner_id=0))   # Charmander (Basic Pokemon)
-        p0.hand.add_card(create_card_instance('base1-98', owner_id=0))   # Fire Energy
-        p0.hand.add_card(create_card_instance('sv3pt5-5', owner_id=0))   # Charmeleon (Stage 1)
+        cards = [
+            create_card_instance('sv3pt5-4', owner_id=0),   # Charmander
+            create_card_instance('base1-98', owner_id=0),   # Fire Energy
+            create_card_instance('sv3pt5-5', owner_id=0),   # Charmeleon
+        ]
+        for card in cards:
+            p0.hand.add_card(card)
 
         encoder = StateEncoder()
         encoded = encoder.encode(state)
 
-        # Card 0: Charmander (Basic Pokemon)
-        if encoded.my_hand[0, 1] != 1.0:  # is_pokemon
-            errors.append("Charmander should have is_pokemon=1")
-        if encoded.my_hand[0, 2] != 1.0:  # is_basic
-            errors.append("Charmander should have is_basic=1")
-        if encoded.my_hand[0, 3] != 0.0:  # is_evolution
-            errors.append("Charmander should have is_evolution=0")
+        # Verify shape is (MAX_HAND_SIZE,) - flat array, not 2D
+        if len(encoded.my_hand.shape) != 1:
+            errors.append(f"Hand should be 1D, got shape {encoded.my_hand.shape}")
+            return errors
 
-        # Card 1: Fire Energy
-        if encoded.my_hand[1, 9] != 1.0:  # is_energy
-            errors.append("Fire Energy should have is_energy=1")
-        if encoded.my_hand[1, 10] != 1.0:  # is_basic_energy
-            errors.append("Fire Energy should have is_basic_energy=1")
+        if encoded.my_hand.shape[0] != MAX_HAND_SIZE:
+            errors.append(f"Hand should have {MAX_HAND_SIZE} slots, got {encoded.my_hand.shape[0]}")
 
-        # Card 2: Charmeleon (Stage 1)
-        if encoded.my_hand[2, 1] != 1.0:  # is_pokemon
-            errors.append("Charmeleon should have is_pokemon=1")
-        if encoded.my_hand[2, 3] != 1.0:  # is_evolution
-            errors.append("Charmeleon should have is_evolution=1")
+        # Verify dtype is integer (for embedding lookup)
+        if not (encoded.my_hand.dtype == 'int64' or encoded.my_hand.dtype == 'int32'):
+            errors.append(f"Hand should be int dtype, got {encoded.my_hand.dtype}")
+
+        # Verify each card ID matches by index
+        for i, card in enumerate(cards):
+            expected_id = encoder.registry.get_id(card.card_id)
+            actual_id = int(encoded.my_hand[i])
+            if actual_id != expected_id:
+                errors.append(f"Hand[{i}]: expected ID {expected_id}, got {actual_id}")
+
+        # Remaining slots should be 0 (EMPTY_ID)
+        for i in range(len(cards), MAX_HAND_SIZE):
+            if encoded.my_hand[i] != 0:
+                errors.append(f"Hand[{i}] should be 0 (empty), got {encoded.my_hand[i]}")
+                break
 
         return errors
 
@@ -330,17 +339,17 @@ class StateEncoderVerifier:
         encoder = StateEncoder()
         encoded = encoder.encode(state)
 
-        # Verify each card ID matches by index
+        # Verify each card ID matches by index (hand is now 1D)
         for i, card in enumerate(cards):
             expected_id = encoder.registry.get_id(card.card_id)
-            actual_id = int(encoded.my_hand[i, 0])
+            actual_id = int(encoded.my_hand[i])
             if actual_id != expected_id:
                 errors.append(f"Hand[{i}]: expected ID {expected_id}, got {actual_id}")
 
         # Remaining slots should be 0
         for i in range(len(cards), MAX_HAND_SIZE):
-            if encoded.my_hand[i, 0] != 0:
-                errors.append(f"Hand[{i}] should be 0, got {encoded.my_hand[i, 0]}")
+            if encoded.my_hand[i] != 0:
+                errors.append(f"Hand[{i}] should be 0, got {encoded.my_hand[i]}")
                 break
 
         return errors
@@ -387,8 +396,8 @@ class StateEncoderVerifier:
             if encoded.my_active[0, 0] <= 0:
                 errors.append("Real game: my_active should have a Pokemon")
 
-            # Hand should have cards
-            hand_count = sum(1 for i in range(MAX_HAND_SIZE) if encoded.my_hand[i, 0] > 0)
+            # Hand should have cards (hand is now 1D array of card IDs)
+            hand_count = sum(1 for i in range(MAX_HAND_SIZE) if encoded.my_hand[i] > 0)
             if hand_count == 0:
                 errors.append("Real game: hand should have cards")
 
@@ -448,7 +457,7 @@ def run_all_tests():
         ("Pokemon HP Features", verifier.verify_pokemon_hp_features),
         ("Energy Counts", verifier.verify_energy_counts),
         ("Status Conditions", verifier.verify_status_conditions),
-        ("Hand Card Types", verifier.verify_hand_card_types),
+        ("Hand Card IDs", verifier.verify_hand_ids),
         ("Discard Sequence", verifier.verify_discard_sequence),
         ("Global Context Flags", verifier.verify_global_context_flags),
         ("Prizes & Deck Counts", verifier.verify_prizes_and_deck_counts),
@@ -477,7 +486,7 @@ def run_all_tests():
     print(f"\n  TOTAL: {total_features} features")
 
     print(f"\n  Pokemon features: {POKEMON_FEATURES}")
-    print(f"  Hand features: {HAND_FEATURES}")
+    print(f"  Hand: {MAX_HAND_SIZE} card IDs (for embedding)")
     print(f"  Global features: {GLOBAL_FEATURES}")
 
     # Summary
