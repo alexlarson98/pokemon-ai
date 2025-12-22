@@ -200,23 +200,22 @@ class MCTS:
         # Reset stats
         self.stats = {'simulations': 0, 'nn_evaluations': 0, 'terminal_states': 0}
 
-        # Create root node
-        root = MCTSNode(state=fast_clone_game_state(state))
-        root.legal_actions = self.engine.get_legal_actions(root.state)
+        # Suppress all engine output during search
+        with suppress_stdout():
+            # Create root node
+            root = MCTSNode(state=fast_clone_game_state(state))
+            root.legal_actions = self.engine.get_legal_actions(root.state)
 
-        if not root.legal_actions:
-            raise ValueError("No legal actions available")
+            if not root.legal_actions:
+                raise ValueError("No legal actions available")
 
-        # Expand root with neural network evaluation
-        self._expand_node(root, add_noise=add_noise)
+            # Expand root with neural network evaluation
+            self._expand_node(root, add_noise=add_noise)
 
-        # Run simulations
-        for i in range(self.num_simulations):
-            self._simulate(root)
-            self.stats['simulations'] += 1
-
-            if self.verbose and (i + 1) % 25 == 0:
-                print(f"  Simulation {i + 1}/{self.num_simulations}")
+            # Run simulations
+            for i in range(self.num_simulations):
+                self._simulate(root)
+                self.stats['simulations'] += 1
 
         # Get action probabilities from visit counts
         action_probs = self._get_action_probabilities(root)
@@ -235,26 +234,25 @@ class MCTS:
 
         No rollouts - uses neural network for leaf evaluation.
         """
-        with suppress_stdout():
-            node = root
+        node = root
 
-            # === SELECTION ===
-            # Traverse tree using PUCT until we find an unexpanded node or terminal
-            while node.is_expanded and not node.is_terminal():
-                node = self._select_child(node)
+        # === SELECTION ===
+        # Traverse tree using PUCT until we find an unexpanded node or terminal
+        while node.is_expanded and not node.is_terminal():
+            node = self._select_child(node)
 
-            # === EXPANSION & EVALUATION ===
-            if node.is_terminal():
-                # Terminal state - get actual game result
-                value = self._get_terminal_value(node)
-                self.stats['terminal_states'] += 1
-            else:
-                # Expand and evaluate with neural network
-                value = self._expand_node(node)
-                self.stats['nn_evaluations'] += 1
+        # === EXPANSION & EVALUATION ===
+        if node.is_terminal():
+            # Terminal state - get actual game result
+            value = self._get_terminal_value(node)
+            self.stats['terminal_states'] += 1
+        else:
+            # Expand and evaluate with neural network
+            value = self._expand_node(node)
+            self.stats['nn_evaluations'] += 1
 
-            # === BACKPROPAGATION ===
-            self._backpropagate(node, value)
+        # === BACKPROPAGATION ===
+        self._backpropagate(node, value)
 
     def _select_child(self, node: MCTSNode) -> MCTSNode:
         """

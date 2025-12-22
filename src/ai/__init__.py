@@ -6,7 +6,10 @@ This module provides:
 - StateEncoder: Converts GameState to neural network input tensors
 - CardIDRegistry: Maps card_id strings to integer IDs for embeddings
 - AlphaZeroNet: Policy-value neural network for AlphaZero training
-- MCTS: Monte Carlo Tree Search (pure or AlphaZero-compatible)
+- MCTS: Monte Carlo Tree Search with neural network guidance
+- SelfPlayWorker: Generates training data through self-play
+- AlphaZeroTrainer: Handles model training and checkpointing
+- train_loop: Main training loop orchestration
 - RandomAgent: Simple random action selection for testing
 """
 
@@ -25,6 +28,15 @@ from .state_encoder import (
     GLOBAL_CONTEXT_SIZE,
 )
 from .model import AlphaZeroNet, create_network, ACTION_SPACE_SIZE
+from .self_play import GameHistory, SelfPlayWorker, run_self_play_games
+from .train import (
+    PokemonDataset,
+    pokemon_collate_fn,
+    AlphaZeroTrainer,
+    ReplayBuffer,
+    train_loop,
+    quick_training_test,
+)
 
 __all__ = [
     # Action encoding
@@ -50,4 +62,15 @@ __all__ = [
     'MCTS',
     'MCTSNode',
     'RandomAgent',
+    # Self-Play
+    'GameHistory',
+    'SelfPlayWorker',
+    'run_self_play_games',
+    # Training
+    'PokemonDataset',
+    'pokemon_collate_fn',
+    'AlphaZeroTrainer',
+    'ReplayBuffer',
+    'train_loop',
+    'quick_training_test',
 ]
