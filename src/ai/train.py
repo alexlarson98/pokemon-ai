@@ -500,7 +500,8 @@ def train_loop(
     replay_buffer_size: int = 100000,
     min_buffer_size: int = 1000,
     verbose: bool = True,
-    verbose_games: bool = False
+    verbose_games: bool = False,
+    use_parallel: bool = True
 ) -> Dict[str, Any]:
     """
     Main AlphaZero training loop.
@@ -525,6 +526,8 @@ def train_loop(
         replay_buffer_size: Maximum samples in replay buffer
         min_buffer_size: Minimum samples before training starts
         verbose: Print progress
+        verbose_games: Print detailed action logs during self-play
+        use_parallel: Use batched parallel self-play for GPU efficiency (default: True)
 
     Returns:
         Dictionary with training history
@@ -561,6 +564,7 @@ def train_loop(
         print(f"Epochs per iteration: {epochs_per_iter}")
         print(f"MCTS simulations: {num_simulations}")
         print(f"Batch size: {batch_size}")
+        print(f"Parallel self-play: {use_parallel}")
         print("=" * 60)
         print()
 
@@ -574,19 +578,32 @@ def train_loop(
         # SELF-PLAY
         # =====================================================================
         if verbose:
-            print(f"[Self-Play] Generating {games_per_iter} games...")
+            mode_str = "parallel batched" if use_parallel else "sequential"
+            print(f"[Self-Play] Generating {games_per_iter} games ({mode_str})...")
 
         selfplay_start = time.time()
 
-        samples, stats = run_self_play_games(
-            engine=engine,
-            model=model,
-            state_encoder=state_encoder,
-            device=device,
-            num_games=games_per_iter,
-            num_simulations=num_simulations,
-            verbose=verbose_games
-        )
+        if use_parallel:
+            from ai.parallel_self_play import run_parallel_self_play
+            samples, stats = run_parallel_self_play(
+                engine=engine,
+                model=model,
+                state_encoder=state_encoder,
+                device=device,
+                num_games=games_per_iter,
+                num_simulations=num_simulations,
+                verbose=verbose_games
+            )
+        else:
+            samples, stats = run_self_play_games(
+                engine=engine,
+                model=model,
+                state_encoder=state_encoder,
+                device=device,
+                num_games=games_per_iter,
+                num_simulations=num_simulations,
+                verbose=verbose_games
+            )
 
         replay_buffer.add_samples(samples)
         total_games += games_per_iter
@@ -676,19 +693,78 @@ def train_loop(
 
         iter_time = time.time() - iter_start
         if verbose:
-            print(f"[Iteration {iteration}] Total time: {iter_time:.1f}s")
+            # Show iteration summary with learning insights
+            print()
+            print(f"  {'='*50}")
+            print(f"  ITERATION {iteration} SUMMARY")
+            print(f"  {'='*50}")
+            print(f"  Time: {iter_time:.1f}s | Games: {games_per_iter} | New samples: {len(samples)}")
+
+            # Show win distribution (helps spot if learning is biased)
+            p0_pct = stats['player_0_wins'] / games_per_iter * 100
+            p1_pct = stats['player_1_wins'] / games_per_iter * 100
+            draw_pct = stats.get('draws', 0) / games_per_iter * 100
+            print(f"  Win rates: P0={p0_pct:.0f}% P1={p1_pct:.0f}% Draw={draw_pct:.0f}%")
+
+            # Show learning metrics if training happened
+            if len(history['policy_loss']) > 0 and history['policy_loss'][-1] is not None:
+                pol_loss = history['policy_loss'][-1]
+                val_loss = history['value_loss'][-1]
+                pol_acc = history['policy_accuracy'][-1]
+
+                print(f"  Policy loss: {pol_loss:.4f} | Value loss: {val_loss:.4f}")
+                print(f"  Policy accuracy: {pol_acc:.1%}")
+
+                # Show trend if we have previous data
+                if len(history['policy_loss']) >= 2 and history['policy_loss'][-2] is not None:
+                    prev_pol_loss = history['policy_loss'][-2]
+                    prev_pol_acc = history['policy_accuracy'][-2]
+
+                    loss_delta = pol_loss - prev_pol_loss
+                    acc_delta = pol_acc - prev_pol_acc
+
+                    loss_arrow = "↓" if loss_delta < 0 else "↑" if loss_delta > 0 else "→"
+                    acc_arrow = "↑" if acc_delta > 0 else "↓" if acc_delta < 0 else "→"
+
+                    print(f"  Trend: Loss {loss_arrow} ({loss_delta:+.4f}) | Acc {acc_arrow} ({acc_delta:+.1%})")
+
+            print(f"  {'='*50}")
             print()
 
     # Final summary
     if verbose:
         print("=" * 60)
-        print("Training Complete!")
+        print("TRAINING COMPLETE")
         print("=" * 60)
         print(f"Total games played: {total_games}")
         print(f"Total samples collected: {total_samples}")
         print(f"Final buffer size: {len(replay_buffer)}")
-        if history['policy_accuracy'][-1] is not None:
-            print(f"Final policy accuracy: {history['policy_accuracy'][-1]:.2%}")
+
+        # Show learning progress over all iterations
+        valid_losses = [l for l in history['policy_loss'] if l is not None]
+        valid_accs = [a for a in history['policy_accuracy'] if a is not None]
+
+        if len(valid_losses) >= 2:
+            first_loss = valid_losses[0]
+            last_loss = valid_losses[-1]
+            first_acc = valid_accs[0]
+            last_acc = valid_accs[-1]
+
+            print()
+            print("Learning Progress:")
+            print(f"  Policy loss:    {first_loss:.4f} -> {last_loss:.4f} ({last_loss - first_loss:+.4f})")
+            print(f"  Policy accuracy: {first_acc:.1%} -> {last_acc:.1%} ({last_acc - first_acc:+.1%})")
+
+            if last_loss < first_loss:
+                print("  Status: LEARNING (loss decreasing)")
+            elif last_acc > first_acc:
+                print("  Status: LEARNING (accuracy improving)")
+            else:
+                print("  Status: May need more iterations or tuning")
+        elif len(valid_accs) > 0:
+            print(f"Final policy accuracy: {valid_accs[-1]:.1%}")
+
+        print("=" * 60)
 
     return history
 

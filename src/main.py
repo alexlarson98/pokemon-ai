@@ -183,6 +183,7 @@ def cmd_train(args):
     print(f"  Batch Size:       {args.batch_size}")
     print(f"  Learning Rate:    {args.lr}")
     print(f"  Device:           {device}")
+    print(f"  Parallel Self-Play: {not args.no_parallel}")
     print(f"  Checkpoint Dir:   {checkpoint_dir}")
     print("=" * 80)
     print()
@@ -208,13 +209,101 @@ def cmd_train(args):
         learning_rate=args.lr,
         checkpoint_dir=checkpoint_dir,
         verbose=True,
-        verbose_games=args.verbose
+        verbose_games=args.verbose,
+        use_parallel=not args.no_parallel
     )
 
     print()
     print("=" * 80)
     print("TRAINING COMPLETE")
     print("=" * 80)
+
+
+# =============================================================================
+# WATCH COMMAND - Play a single game with detailed output
+# =============================================================================
+
+def cmd_watch(args):
+    """Watch a single AI game with detailed action logs."""
+    import torch
+
+    print(BANNER)
+    print("Watch Mode - Single Game with Detailed Logging")
+    print("=" * 60)
+    print()
+
+    # Device detection
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Device: {device}")
+    print(f"MCTS Simulations: {args.sims}")
+    print()
+
+    # Initialize components
+    from engine import PokemonEngine
+    from ai.state_encoder import StateEncoder, CardIDRegistry
+    from ai.model import AlphaZeroNet, ACTION_SPACE_SIZE
+    from ai.self_play import SelfPlayWorker
+
+    engine = PokemonEngine()
+    registry = CardIDRegistry()
+    state_encoder = StateEncoder(registry)
+
+    model = AlphaZeroNet(
+        action_space_size=ACTION_SPACE_SIZE,
+        vocab_size=5000,
+        embedding_dim=64,
+        backbone_dim=512,
+        num_residual_blocks=6
+    )
+    model = model.to(device)
+
+    # Load checkpoint if provided
+    if args.checkpoint:
+        print(f"Loading checkpoint: {args.checkpoint}")
+        if os.path.exists(args.checkpoint):
+            checkpoint = torch.load(args.checkpoint, map_location=device)
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                iteration = checkpoint.get('iteration', 0)
+                print(f"  [OK] Loaded from iteration {iteration}")
+            else:
+                model.load_state_dict(checkpoint)
+                print(f"  [OK] Loaded model weights")
+        else:
+            print(f"  [ERROR] Checkpoint not found!")
+            sys.exit(1)
+    else:
+        print("Using untrained model (random policy)")
+
+    print()
+    print("=" * 60)
+    print("GAME START")
+    print("=" * 60)
+    print()
+
+    # Play one game with verbose output
+    worker = SelfPlayWorker(
+        engine=engine,
+        model=model,
+        state_encoder=state_encoder,
+        device=device,
+        num_simulations=args.sims,
+        verbose=True  # Enable detailed logging
+    )
+
+    samples, game_info = worker.play_game()
+
+    print()
+    print("=" * 60)
+    print("GAME SUMMARY")
+    print("=" * 60)
+    print(f"  Turns: {game_info['turns']}")
+    print(f"  Winner: Player {game_info['winner']}" if game_info['winner'] is not None else "  Winner: Draw")
+    print(f"  Result: {game_info['result']}")
+    print(f"  Samples collected: {game_info['samples_collected']}")
+    print(f"  P0 prizes remaining: {game_info['p0_prizes_left']}")
+    print(f"  P1 prizes remaining: {game_info['p1_prizes_left']}")
+    print()
 
 
 # =============================================================================
@@ -390,7 +479,25 @@ Examples:
         '--verbose', '-v', action='store_true',
         help='Show detailed action logs during self-play'
     )
+    train_parser.add_argument(
+        '--no-parallel', action='store_true',
+        help='Disable parallel batched self-play (use sequential instead)'
+    )
     train_parser.set_defaults(func=cmd_train)
+
+    # -------------------------------------------------------------------------
+    # Watch subcommand - play a single game with detailed output
+    # -------------------------------------------------------------------------
+    watch_parser = subparsers.add_parser('watch', help='Watch a single AI game with detailed action logs')
+    watch_parser.add_argument(
+        '--sims', type=int, default=75,
+        help='MCTS simulations per move (default: 75)'
+    )
+    watch_parser.add_argument(
+        '--checkpoint', type=str, default=None,
+        help='Path to model checkpoint (uses untrained model if not specified)'
+    )
+    watch_parser.set_defaults(func=cmd_watch)
 
     # -------------------------------------------------------------------------
     # Verify subcommand

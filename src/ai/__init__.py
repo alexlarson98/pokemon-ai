@@ -29,6 +29,11 @@ from .state_encoder import (
 )
 from .model import AlphaZeroNet, create_network, ACTION_SPACE_SIZE
 from .self_play import GameHistory, SelfPlayWorker, run_self_play_games
+from .parallel_self_play import (
+    BatchMCTS,
+    ParallelSelfPlayWorker,
+    run_parallel_self_play,
+)
 from .train import (
     PokemonDataset,
     pokemon_collate_fn,
@@ -66,6 +71,10 @@ __all__ = [
     'GameHistory',
     'SelfPlayWorker',
     'run_self_play_games',
+    # Parallel Self-Play
+    'BatchMCTS',
+    'ParallelSelfPlayWorker',
+    'run_parallel_self_play',
     # Training
     'PokemonDataset',
     'pokemon_collate_fn',
