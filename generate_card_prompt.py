@@ -103,6 +103,12 @@ def detect_stack_pattern(text: str) -> dict:
         result['pattern'] = 'SWITCH_POKEMON'
         result['steps'].append('SelectFromZoneStep (BENCH -> ACTIVE)')
 
+    # Pattern 6: Bench discard (Stadium effects like Area Zero Underdepths)
+    if 'discard pokemon from' in text_lower and 'bench' in text_lower:
+        result['use_stack'] = True
+        result['pattern'] = 'DISCARD_FROM_BENCH'
+        result['steps'].append('SelectFromZoneStep (zone=ZoneType.BENCH, purpose=DISCARD_FROM_PLAY)')
+
     return result
 
 
@@ -322,6 +328,8 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
             # Decide Pillar
             if any(s in subtypes for s in ['Supporter', 'Item']):
                 pillar = 'ACTION'
+            elif 'Stadium' in subtypes:
+                pillar = 'ACTION'  # Stadiums have a play action
             else:
                 pillar = classify_text_pillar(full_text, subtypes)
 
@@ -334,8 +342,24 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                 'pillar': pillar,
                 'text': full_text,
                 'is_attack': False,
+                'is_stadium': 'Stadium' in subtypes,
                 'stack_info': stack_info
             })
+
+            # For Stadiums: Check for on_leave effects (when this card leaves play)
+            if 'Stadium' in subtypes:
+                text_lower = full_text.lower()
+                if 'when this card leaves play' in text_lower or 'leaves play' in text_lower:
+                    features.append({
+                        'name': f'{card_name} (Leave)',
+                        'snake': f'{card_snake}_on_leave',
+                        'pillar': 'HOOK',
+                        'text': f'Triggered when this Stadium leaves play.',
+                        'is_attack': False,
+                        'is_stadium': True,
+                        'is_leave_hook': True,
+                        'stack_info': detect_stack_pattern(full_text)
+                    })
 
         else: # Pokémon
             for ab in first_card.get('abilities', []):
@@ -398,9 +422,16 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                     prompt += f"- Implement `{func}(state, card, context)`\n"
 
                 elif f['pillar'] == 'HOOK':
-                    func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
-                    generated_functions.append(func)
-                    prompt += f"- Implement `{func}(state, card, context)`\n"
+                    # Check for Stadium leave hook
+                    if f.get('is_leave_hook'):
+                        func = f"{card_snake}_on_leave_hook"
+                        generated_functions.append(func)
+                        prompt += f"- Implement `{func}(state, stadium)` (On Stadium Leave Hook)\n"
+                        prompt += f"  - Called when this Stadium is replaced or discarded\n"
+                    else:
+                        func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
+                        generated_functions.append(func)
+                        prompt += f"- Implement `{func}(state, card, context)`\n"
 
                     # Add Stack Architecture guidance for hooks if detected
                     if stack_info['use_stack']:
@@ -536,9 +567,14 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
 
                     elif f['pillar'] == 'HOOK':
                         # Hook ability
-                        trigger = "on_play" if "play" in f['text'].lower() else "on_knockout" if "knocked out" in f['text'].lower() else "on_event"
+                        # Check for Stadium leave hook
+                        if f.get('is_leave_hook'):
+                            trigger = "on_stadium_leave"
+                            func = f"{card_snake}_on_leave_hook"
+                        else:
+                            trigger = "on_play" if "play" in f['text'].lower() else "on_knockout" if "knocked out" in f['text'].lower() else "on_event"
+                            func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
 
-                        func = f"{card_snake}_hook" if supertype == 'Trainer' else f"{card_snake}_{f['snake']}_hook"
                         out += f'        "{f["name"]}": {{\n'
                         out += f'            "category": "hook",\n'
                         out += f'            "trigger": "{trigger}",\n'
