@@ -146,6 +146,7 @@ private:
     void apply_promote_active(GameState& state, const Action& action) const;
     void apply_select_card(GameState& state, const Action& action) const;
     void apply_confirm_selection(GameState& state, const Action& action) const;
+    void process_step_completion(GameState& state) const;
 
     // ========================================================================
     // PHASE TRANSITIONS

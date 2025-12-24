@@ -200,7 +200,7 @@ std::vector<Action> PokemonEngine::get_main_phase_actions(const GameState& state
 }
 
 // ============================================================================
-// ENERGY ATTACH ACTIONS (Stack-Based to reduce action space)
+// ENERGY ATTACH ACTIONS (Atomic - optimal for MCTS)
 // ============================================================================
 
 std::vector<Action> PokemonEngine::get_energy_attach_actions(const GameState& state) const {
@@ -212,36 +212,42 @@ std::vector<Action> PokemonEngine::get_energy_attach_actions(const GameState& st
         return actions;
     }
 
-    // Check if player has any energy to attach
-    bool has_energy = false;
-    for (const auto& card : player.hand.cards) {
-        const CardDef* def = card_db_.get_card(card.card_id);
-        if (def && def->is_energy()) {
-            has_energy = true;
-            break;
-        }
-    }
-
-    if (!has_energy) {
-        return actions;
-    }
-
     // Check if player has any Pokemon in play
     if (!player.has_any_pokemon_in_play()) {
         return actions;
     }
 
-    // Stack-based approach: Generate ONE "Attach Energy" action
-    // This will push resolution steps to:
-    // 1. Select which energy from hand
-    // 2. Select which Pokemon to attach to
-    //
-    // This reduces action space from E×T (energy × targets) to just 1 action
-    // Matches Python engine's _get_attach_energy_actions() with use_stack=True
-    Action attach_action(ActionType::ATTACH_ENERGY, player.player_id);
-    attach_action.display_label = "Attach Energy";
-    attach_action.parameters["use_stack"] = "true";
-    actions.push_back(attach_action);
+    // Get all Pokemon targets (active + bench)
+    auto pokemon_list = player.board.get_all_pokemon();
+    if (pokemon_list.empty()) {
+        return actions;
+    }
+
+    // Deduplicate energy by functional ID
+    // We generate E × P atomic actions (energy × pokemon targets)
+    std::unordered_set<std::string> seen_energy_fids;
+
+    for (const auto& card : player.hand.cards) {
+        const CardDef* def = card_db_.get_card(card.card_id);
+        if (!def || !def->is_energy()) {
+            continue;
+        }
+
+        // Deduplicate by functional ID
+        std::string fid = def->get_functional_id();
+        if (seen_energy_fids.count(fid) > 0) {
+            continue;
+        }
+        seen_energy_fids.insert(fid);
+
+        // Generate one action per target Pokemon
+        for (const auto* target : pokemon_list) {
+            Action attach_action(ActionType::ATTACH_ENERGY, player.player_id);
+            attach_action.card_id = card.id;      // Energy card instance ID
+            attach_action.target_id = target->id; // Pokemon instance ID
+            actions.push_back(attach_action);
+        }
+    }
 
     return actions;
 }
@@ -1156,30 +1162,45 @@ void PokemonEngine::apply_select_card(GameState& state, const Action& action) co
     if (state.resolution_stack.empty()) return;
 
     auto& step = state.resolution_stack.back();
+    bool should_auto_complete = false;
 
     std::visit([&](auto& s) {
         using T = std::decay_t<decltype(s)>;
 
-        if constexpr (std::is_same_v<T, SelectFromZoneStep> || std::is_same_v<T, SearchDeckStep>) {
+        if constexpr (std::is_same_v<T, SelectFromZoneStep>) {
             s.selected_card_ids.push_back(*action.card_id);
+            // Auto-complete when exact count reached (MCTS optimization - no meaningless confirm step)
+            if (s.exact_count && static_cast<int>(s.selected_card_ids.size()) == s.count) {
+                s.is_complete = true;
+                should_auto_complete = true;
+            }
+        }
+        else if constexpr (std::is_same_v<T, SearchDeckStep>) {
+            s.selected_card_ids.push_back(*action.card_id);
+            // Auto-complete when max count reached (MCTS optimization - no meaningless confirm step)
+            if (static_cast<int>(s.selected_card_ids.size()) == s.count) {
+                s.is_complete = true;
+                should_auto_complete = true;
+            }
         }
         else if constexpr (std::is_same_v<T, AttachToTargetStep>) {
             s.selected_target_id = *action.card_id;
             s.is_complete = true;
+            should_auto_complete = true;
         }
     }, step);
+
+    // If auto-completed, process the step completion immediately
+    if (should_auto_complete) {
+        process_step_completion(state);
+    }
 }
 
-void PokemonEngine::apply_confirm_selection(GameState& state, const Action& action) const {
+void PokemonEngine::process_step_completion(GameState& state) const {
     if (state.resolution_stack.empty()) return;
 
     auto step = state.resolution_stack.back();  // Copy for callback processing
 
-    std::visit([&](auto& s) {
-        s.is_complete = true;
-    }, state.resolution_stack.back());
-
-    // Process step completion callbacks
     std::visit([&](const auto& s) {
         using T = std::decay_t<decltype(s)>;
 
@@ -1215,6 +1236,8 @@ void PokemonEngine::apply_confirm_selection(GameState& state, const Action& acti
                 }
                 return;  // Early return, don't pop again
             }
+            // Default: just pop the step
+            state.pop_step();
         }
         else if constexpr (std::is_same_v<T, AttachToTargetStep>) {
             if (s.on_complete_callback.has_value() &&
@@ -1237,6 +1260,8 @@ void PokemonEngine::apply_confirm_selection(GameState& state, const Action& acti
                 }
                 return;  // Early return, don't pop again
             }
+            // Default: just pop the step
+            state.pop_step();
         }
         else if constexpr (std::is_same_v<T, SearchDeckStep>) {
             // Pop and process search result
@@ -1270,12 +1295,23 @@ void PokemonEngine::apply_confirm_selection(GameState& state, const Action& acti
             if (s.shuffle_after) {
                 player.deck.shuffle(rng_);
             }
-            return;
         }
-
-        // Default: just pop the step
-        state.pop_step();
+        else {
+            // Default: just pop the step
+            state.pop_step();
+        }
     }, step);
+}
+
+void PokemonEngine::apply_confirm_selection(GameState& state, const Action& action) const {
+    if (state.resolution_stack.empty()) return;
+
+    std::visit([&](auto& s) {
+        s.is_complete = true;
+    }, state.resolution_stack.back());
+
+    // Process step completion
+    process_step_completion(state);
 }
 
 // ============================================================================

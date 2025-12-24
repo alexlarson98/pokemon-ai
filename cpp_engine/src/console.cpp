@@ -105,6 +105,12 @@ std::string action_type_to_string(ActionType type) {
         case ActionType::SEARCH_SELECT_COUNT: return "SEARCH_SELECT_COUNT";
         case ActionType::SEARCH_SELECT_CARD: return "SEARCH_SELECT_CARD";
         case ActionType::SEARCH_CONFIRM: return "SEARCH_CONFIRM";
+        case ActionType::SELECT_CARD: return "SELECT_CARD";
+        case ActionType::CONFIRM_SELECTION: return "CONFIRM";
+        case ActionType::CANCEL_ACTION: return "CANCEL";
+        case ActionType::INTERRUPT_ATTACH_ENERGY: return "INTERRUPT_ATTACH";
+        case ActionType::COIN_FLIP: return "COIN_FLIP";
+        case ActionType::SHUFFLE: return "SHUFFLE";
         default: return "UNKNOWN";
     }
 }
@@ -670,10 +676,9 @@ class Console {
 public:
     GameState state;
     PokemonEngine engine;
-    LogicRegistry registry;
     std::vector<DeckCard> deck_cards;
     std::vector<Action> current_actions;
-    std::string deck_path = "c:/Users/alexl/Desktop/Projects/pokemon-ai/src/decks/screw_the_bot.txt";
+    std::string deck_path = "c:/Users/alexl/Desktop/Projects/pokemon-ai/src/decks/charizard_ex.txt";
 
     // Card name map (card_id -> name)
     std::unordered_map<std::string, std::string> card_name_map;
@@ -696,7 +701,8 @@ public:
     bool game_started = false;
 
     Console() {
-        register_all_trainers(registry);
+        // Register trainers to the ENGINE's logic registry (not a separate one!)
+        register_all_trainers(engine.get_logic_registry());
         // Seed RNG with current time
         auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         rng.seed(static_cast<unsigned int>(seed));
@@ -1075,6 +1081,7 @@ public:
         trainer_card.id = "played_trainer";
         trainer_card.card_id = card_id;
 
+        auto& registry = engine.get_logic_registry();
         if (!registry.has_trainer(card_id)) {
             std::cout << "Trainer " << card_id << " not registered in registry." << std::endl;
             return;
