@@ -127,6 +127,19 @@ struct PlayerState {
         return nullptr;
     }
 
+    const CardInstance* find_card_anywhere(const CardID& card_id) const {
+        // Check board first (most common case)
+        if (auto* p = board.find_pokemon(card_id)) return p;
+
+        // Check zones
+        if (auto* c = hand.find_card(card_id)) return c;
+        if (auto* c = deck.find_card(card_id)) return c;
+        if (auto* c = discard.find_card(card_id)) return c;
+        if (auto* c = prizes.find_card(card_id)) return c;
+
+        return nullptr;
+    }
+
     // ========================================================================
     // CLONING
     // ========================================================================

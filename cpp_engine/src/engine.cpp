@@ -5,8 +5,10 @@
  */
 
 #include "engine.hpp"
+#include "resolution_step.hpp"
 #include <algorithm>
 #include <chrono>
+#include <unordered_set>
 
 namespace pokemon {
 
@@ -198,7 +200,7 @@ std::vector<Action> PokemonEngine::get_main_phase_actions(const GameState& state
 }
 
 // ============================================================================
-// ENERGY ATTACH ACTIONS
+// ENERGY ATTACH ACTIONS (Stack-Based to reduce action space)
 // ============================================================================
 
 std::vector<Action> PokemonEngine::get_energy_attach_actions(const GameState& state) const {
@@ -210,18 +212,36 @@ std::vector<Action> PokemonEngine::get_energy_attach_actions(const GameState& st
         return actions;
     }
 
-    // Find energy cards in hand
+    // Check if player has any energy to attach
+    bool has_energy = false;
     for (const auto& card : player.hand.cards) {
         const CardDef* def = card_db_.get_card(card.card_id);
         if (def && def->is_energy()) {
-            // Can attach to any Pokemon in play
-            auto pokemon_list = player.board.get_all_pokemon();
-            for (const auto* pokemon : pokemon_list) {
-                actions.push_back(Action::attach_energy(
-                    player.player_id, card.id, pokemon->id));
-            }
+            has_energy = true;
+            break;
         }
     }
+
+    if (!has_energy) {
+        return actions;
+    }
+
+    // Check if player has any Pokemon in play
+    if (!player.has_any_pokemon_in_play()) {
+        return actions;
+    }
+
+    // Stack-based approach: Generate ONE "Attach Energy" action
+    // This will push resolution steps to:
+    // 1. Select which energy from hand
+    // 2. Select which Pokemon to attach to
+    //
+    // This reduces action space from E×T (energy × targets) to just 1 action
+    // Matches Python engine's _get_attach_energy_actions() with use_stack=True
+    Action attach_action(ActionType::ATTACH_ENERGY, player.player_id);
+    attach_action.display_label = "Attach Energy";
+    attach_action.parameters["use_stack"] = "true";
+    actions.push_back(attach_action);
 
     return actions;
 }
@@ -239,15 +259,17 @@ std::vector<Action> PokemonEngine::get_play_basic_actions(const GameState& state
         return actions;
     }
 
-    // Find basic Pokemon in hand (deduplicate by name)
-    std::unordered_set<std::string> seen_names;
+    // Find basic Pokemon in hand (deduplicate by functional ID, NOT name)
+    // Example: Charmander 80HP with ability vs Charmander 70HP without ability
+    std::unordered_set<std::string> seen_functional_ids;
 
     for (const auto& card : player.hand.cards) {
         const CardDef* def = card_db_.get_card(card.card_id);
         if (def && def->is_basic_pokemon()) {
-            // Deduplicate by name
-            if (seen_names.find(def->name) == seen_names.end()) {
-                seen_names.insert(def->name);
+            // Deduplicate by functional ID
+            std::string fid = def->get_functional_id();
+            if (seen_functional_ids.find(fid) == seen_functional_ids.end()) {
+                seen_functional_ids.insert(fid);
                 actions.push_back(Action::play_basic(player.player_id, card.id));
             }
         }
@@ -270,6 +292,7 @@ std::vector<Action> PokemonEngine::get_evolution_actions(const GameState& state)
     }
 
     // Find evolution cards in hand
+    // Deduplicate by (functional_id, target_id) to handle same-name evolutions with different stats
     std::unordered_set<std::string> seen_evolutions;
 
     for (const auto& card : player.hand.cards) {
@@ -286,8 +309,8 @@ std::vector<Action> PokemonEngine::get_evolution_actions(const GameState& state)
 
             // Check evolution rules
             if (can_evolve(state, *pokemon, *def)) {
-                // Deduplicate by (evolution_name, target_id)
-                std::string key = def->name + ":" + pokemon->id;
+                // Deduplicate by (functional_id, target_id)
+                std::string key = def->get_functional_id() + ":" + pokemon->id;
                 if (seen_evolutions.find(key) == seen_evolutions.end()) {
                     seen_evolutions.insert(key);
                     actions.push_back(Action::evolve(
@@ -308,7 +331,12 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
     std::vector<Action> actions;
     const auto& player = state.get_active_player();
 
-    // Track seen cards for deduplication
+    // Check global permission: Item Lock
+    // This is set by passives like Klefki's Mischievous Lock or abilities like Vileplume's Allergy Flower
+    bool items_locked = logic_registry_.check_global_block(state, "global_play_item");
+
+    // Track seen cards for deduplication by functional ID
+    // Trainers with same name from different sets may have different effects
     std::unordered_set<std::string> seen_items;
     std::unordered_set<std::string> seen_supporters;
     std::unordered_set<std::string> seen_stadiums;
@@ -319,10 +347,17 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
             continue;
         }
 
+        std::string fid = def->get_functional_id();
+
         // Item cards
         if (def->is_item()) {
-            if (seen_items.find(def->name) == seen_items.end()) {
-                seen_items.insert(def->name);
+            // Check Item Lock
+            if (items_locked) {
+                continue;  // Cannot play items when locked
+            }
+
+            if (seen_items.find(fid) == seen_items.end()) {
+                seen_items.insert(fid);
                 actions.push_back(Action::play_item(player.player_id, card.id));
             }
         }
@@ -336,8 +371,8 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
                 continue;  // Cannot play supporter on turn 1 going first
             }
 
-            if (seen_supporters.find(def->name) == seen_supporters.end()) {
-                seen_supporters.insert(def->name);
+            if (seen_supporters.find(fid) == seen_supporters.end()) {
+                seen_supporters.insert(fid);
                 actions.push_back(Action::play_supporter(player.player_id, card.id));
             }
         }
@@ -348,7 +383,7 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
                 continue;
             }
 
-            // Cannot play same stadium as current
+            // Cannot play same stadium as current (by name, not functional ID)
             if (state.stadium.has_value()) {
                 const CardDef* current_stadium = card_db_.get_card(state.stadium->card_id);
                 if (current_stadium && current_stadium->name == def->name) {
@@ -356,8 +391,8 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
                 }
             }
 
-            if (seen_stadiums.find(def->name) == seen_stadiums.end()) {
-                seen_stadiums.insert(def->name);
+            if (seen_stadiums.find(fid) == seen_stadiums.end()) {
+                seen_stadiums.insert(fid);
                 actions.push_back(Action::play_stadium(player.player_id, card.id));
             }
         }
@@ -401,6 +436,12 @@ std::vector<Action> PokemonEngine::get_ability_actions(const GameState& state) c
             // Check once-per-turn restriction
             if (pokemon->abilities_used_this_turn.count(ability.name) > 0) {
                 continue;
+            }
+
+            // Check if ability is blocked by a passive ability lock (e.g., Klefki)
+            // This matches Python's is_ability_blocked_by_passive()
+            if (logic_registry_.is_ability_blocked_by_passive(state, *pokemon, ability.name)) {
+                continue;  // Ability is blocked
             }
 
             actions.push_back(Action::use_ability(
@@ -529,6 +570,10 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
             }
 
             if (zone) {
+                // Deduplicate by functional ID (NOT name - cards with same name can differ)
+                // Example: Charmander 80HP with ability vs Charmander 70HP without ability
+                std::unordered_set<std::string> seen_functional_ids;
+
                 for (const auto& card : zone->cards) {
                     // Skip excluded cards
                     bool excluded = std::find(s.exclude_card_ids.begin(),
@@ -540,7 +585,20 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
                         s.selected_card_ids.end(), card.id) != s.selected_card_ids.end();
                     if (selected) continue;
 
-                    // TODO: Apply filter_criteria
+                    // Apply filter_criteria
+                    if (!s.filter_criteria.empty()) {
+                        if (!card_matches_filter(card, s.filter_criteria, state, player)) {
+                            continue;
+                        }
+                    }
+
+                    // Deduplicate by functional ID
+                    const CardDef* def = card_db_.get_card(card.card_id);
+                    if (def) {
+                        std::string fid = def->get_functional_id();
+                        if (seen_functional_ids.count(fid) > 0) continue;
+                        seen_functional_ids.insert(fid);
+                    }
 
                     actions.push_back(Action::select_card(s.player_id, card.id));
                 }
@@ -554,13 +612,30 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
         else if constexpr (std::is_same_v<T, SearchDeckStep>) {
             const auto& player = state.get_player(s.player_id);
 
+            // Deduplicate by functional ID (NOT name - cards with same name can differ)
+            // Example: Charmander 80HP with ability vs Charmander 70HP without ability
+            std::unordered_set<std::string> seen_functional_ids;
+
             for (const auto& card : player.deck.cards) {
                 // Skip already selected
                 bool selected = std::find(s.selected_card_ids.begin(),
                     s.selected_card_ids.end(), card.id) != s.selected_card_ids.end();
                 if (selected) continue;
 
-                // TODO: Apply filter_criteria
+                // Apply filter_criteria
+                if (!s.filter_criteria.empty()) {
+                    if (!card_matches_filter(card, s.filter_criteria, state, player)) {
+                        continue;
+                    }
+                }
+
+                // Deduplicate by functional ID
+                const CardDef* def = card_db_.get_card(card.card_id);
+                if (def) {
+                    std::string fid = def->get_functional_id();
+                    if (seen_functional_ids.count(fid) > 0) continue;
+                    seen_functional_ids.insert(fid);
+                }
 
                 if (static_cast<int>(s.selected_card_ids.size()) < s.count) {
                     actions.push_back(Action::select_card(s.player_id, card.id));
@@ -724,7 +799,35 @@ void PokemonEngine::apply_place_bench(GameState& state, const Action& action) co
 }
 
 void PokemonEngine::apply_play_basic(GameState& state, const Action& action) const {
-    apply_place_bench(state, action);
+    auto& player = state.get_player(action.player_id);
+
+    auto card_opt = player.hand.take_card(*action.card_id);
+    if (!card_opt.has_value()) return;
+
+    const CardDef* def = card_db_.get_card(card_opt->card_id);
+    if (def) {
+        card_opt->current_hp = def->hp;
+    }
+
+    // Add to bench
+    player.board.add_to_bench(std::move(*card_opt));
+
+    // Trigger on_play hooks for the newly placed Pokemon
+    // This is for abilities like Flamigo's Insta-Flock
+    if (def) {
+        // Get the pokemon we just placed (it's at the end of the bench)
+        const auto& placed_pokemon = player.board.bench.back();
+
+        for (const auto& ability : def->abilities) {
+            if (ability.category == "hook" && ability.trigger == "on_play") {
+                // Check if ability is blocked
+                if (!logic_registry_.is_ability_blocked_by_passive(state, placed_pokemon, ability.name)) {
+                    // Trigger the hook
+                    logic_registry_.trigger_hooks(state, "on_play");
+                }
+            }
+        }
+    }
 }
 
 void PokemonEngine::apply_evolve(GameState& state, const Action& action) const {
@@ -760,10 +863,47 @@ void PokemonEngine::apply_evolve(GameState& state, const Action& action) const {
     evo_opt->attack_effects.clear();
 
     *target = std::move(*evo_opt);
+
+    // Trigger on_evolve hooks for the evolved Pokemon
+    // This is for abilities like Charizard ex's Infernal Reign
+    for (const auto& ability : evo_def->abilities) {
+        if (ability.category == "hook" && ability.trigger == "on_evolve") {
+            // Check if ability is blocked
+            if (!logic_registry_.is_ability_blocked_by_passive(state, *target, ability.name)) {
+                // Trigger the hook
+                logic_registry_.trigger_hooks(state, "on_evolve");
+            }
+        }
+    }
 }
 
 void PokemonEngine::apply_attach_energy(GameState& state, const Action& action) const {
     auto& player = state.get_player(action.player_id);
+
+    // Stack-based approach: Push resolution steps to select energy and target
+    auto it = action.parameters.find("use_stack");
+    if (it != action.parameters.end() && it->second == "true") {
+        // Push SelectFromZoneStep to pick energy from hand
+        SelectFromZoneStep select_energy;
+        select_energy.source_card_id = "";  // No source card, it's a game action
+        select_energy.source_card_name = "Attach Energy";
+        select_energy.player_id = action.player_id;
+        select_energy.purpose = SelectionPurpose::ENERGY_TO_ATTACH;
+        select_energy.zone = ZoneType::HAND;
+        select_energy.count = 1;
+        select_energy.min_count = 1;
+        select_energy.exact_count = true;
+        select_energy.filter_criteria["supertype"] = "Energy";
+        select_energy.on_complete_callback = "attach_energy_select_target";
+
+        state.push_step(select_energy);
+        return;
+    }
+
+    // Direct attachment (when card_id and target_id are specified)
+    if (!action.card_id.has_value() || !action.target_id.has_value()) {
+        return;
+    }
 
     auto energy_opt = player.hand.take_card(*action.card_id);
     if (!energy_opt.has_value()) return;
@@ -781,7 +921,16 @@ void PokemonEngine::apply_play_item(GameState& state, const Action& action) cons
     auto card_opt = player.hand.take_card(*action.card_id);
     if (!card_opt.has_value()) return;
 
-    // TODO: Execute item effect via logic registry
+    // Execute item effect via logic registry
+    if (logic_registry_.has_trainer(card_opt->card_id)) {
+        TrainerResult result = logic_registry_.invoke_trainer(
+            card_opt->card_id, state, *card_opt);
+
+        // Push any resolution steps
+        for (auto& step : result.push_steps) {
+            state.push_step(step);
+        }
+    }
 
     // Move to discard
     player.discard.add_card(std::move(*card_opt));
@@ -795,7 +944,16 @@ void PokemonEngine::apply_play_supporter(GameState& state, const Action& action)
 
     player.supporter_played_this_turn = true;
 
-    // TODO: Execute supporter effect via logic registry
+    // Execute supporter effect via logic registry
+    if (logic_registry_.has_trainer(card_opt->card_id)) {
+        TrainerResult result = logic_registry_.invoke_trainer(
+            card_opt->card_id, state, *card_opt);
+
+        // Push any resolution steps
+        for (auto& step : result.push_steps) {
+            state.push_step(step);
+        }
+    }
 
     // Move to discard
     player.discard.add_card(std::move(*card_opt));
@@ -838,7 +996,16 @@ void PokemonEngine::apply_use_ability(GameState& state, const Action& action) co
     // Mark ability as used
     pokemon->abilities_used_this_turn.insert(*action.ability_name);
 
-    // TODO: Execute ability effect via logic registry
+    // Execute ability effect via logic registry
+    if (logic_registry_.has_ability(pokemon->card_id, *action.ability_name)) {
+        AbilityResult result = logic_registry_.invoke_ability(
+            pokemon->card_id, *action.ability_name, state, *pokemon);
+
+        // Push any resolution steps
+        for (auto& step : result.push_steps) {
+            state.push_step(step);
+        }
+    }
 }
 
 void PokemonEngine::apply_retreat(GameState& state, const Action& action) const {
@@ -893,27 +1060,63 @@ void PokemonEngine::apply_attack(GameState& state, const Action& action) const {
 
     if (!attack) return;
 
-    // Calculate and apply damage
+    // Calculate base damage
     int base_damage = attack->base_damage;
 
-    // TODO: Execute attack effect via logic registry (may modify damage)
+    // Execute attack effect via logic registry (may modify damage or add effects)
+    AttackResult attack_result;
+    if (logic_registry_.has_attack(attacker.card_id, attack->name)) {
+        attack_result = logic_registry_.invoke_attack(
+            attacker.card_id, attack->name, state, attacker, &defender);
 
+        // If the logic returned damage, use that instead
+        if (attack_result.damage_dealt > 0) {
+            base_damage = attack_result.damage_dealt;
+        }
+    }
+
+    // Apply damage
     if (base_damage > 0) {
         int final_damage = calculate_damage(state, attacker, defender, base_damage);
         apply_damage(state, defender, final_damage);
+    }
+
+    // Apply any additional effects from attack result
+    for (const auto& [target_id, status] : attack_result.add_status) {
+        auto* target = player.find_pokemon(target_id);
+        if (!target) {
+            target = opponent.find_pokemon(target_id);
+        }
+        if (target) {
+            target->add_status(status);
+        }
     }
 
     // Check for knockout
     const CardDef* defender_def = card_db_.get_card(defender.card_id);
     if (defender_def && defender.is_knocked_out(defender_def->hp)) {
         // KO handling
-        // Move to discard
+        // Move to discard (along with attached cards)
+        for (auto& energy : defender.attached_energy) {
+            opponent.discard.add_card(std::move(energy));
+        }
+        for (auto& tool : defender.attached_tools) {
+            opponent.discard.add_card(std::move(tool));
+        }
         opponent.discard.add_card(std::move(*opponent.board.active_spot));
         opponent.board.active_spot.reset();
 
-        // Player takes prizes
+        // Player takes prizes - push onto resolution stack
         int prizes_to_take = defender_def->get_prize_value();
-        // TODO: Push prize taking onto resolution stack
+        for (int i = 0; i < prizes_to_take && !player.prizes.is_empty(); ++i) {
+            // For now, take first available prize (simplified)
+            if (!player.prizes.cards.empty()) {
+                auto prize = std::move(player.prizes.cards.back());
+                player.prizes.cards.pop_back();
+                player.hand.add_card(std::move(prize));
+                player.prizes_taken++;
+            }
+        }
     }
 
     // Advance to cleanup
@@ -970,17 +1173,109 @@ void PokemonEngine::apply_select_card(GameState& state, const Action& action) co
 void PokemonEngine::apply_confirm_selection(GameState& state, const Action& action) const {
     if (state.resolution_stack.empty()) return;
 
-    auto& step = state.resolution_stack.back();
+    auto step = state.resolution_stack.back();  // Copy for callback processing
 
     std::visit([&](auto& s) {
         s.is_complete = true;
-    }, step);
+    }, state.resolution_stack.back());
 
-    // Pop completed step
-    if (is_step_complete(step)) {
-        // TODO: Execute step completion callback
+    // Process step completion callbacks
+    std::visit([&](const auto& s) {
+        using T = std::decay_t<decltype(s)>;
+
+        if constexpr (std::is_same_v<T, SelectFromZoneStep>) {
+            // Handle energy attachment workflow
+            if (s.on_complete_callback.has_value() &&
+                *s.on_complete_callback == "attach_energy_select_target") {
+                // Pop the selection step
+                state.pop_step();
+
+                // Get selected energy and push target selection
+                if (!s.selected_card_ids.empty()) {
+                    auto& player = state.get_player(s.player_id);
+
+                    // Collect valid Pokemon targets
+                    std::vector<CardID> target_ids;
+                    auto pokemon_list = player.board.get_all_pokemon();
+                    for (const auto* pokemon : pokemon_list) {
+                        target_ids.push_back(pokemon->id);
+                    }
+
+                    // Push AttachToTargetStep
+                    AttachToTargetStep attach_step;
+                    attach_step.source_card_id = s.selected_card_ids[0];
+                    attach_step.source_card_name = "Attach Energy";
+                    attach_step.player_id = s.player_id;
+                    attach_step.purpose = SelectionPurpose::ATTACH_TARGET;
+                    attach_step.card_to_attach_id = s.selected_card_ids[0];
+                    attach_step.valid_target_ids = std::move(target_ids);
+                    attach_step.on_complete_callback = "attach_energy_complete";
+
+                    state.push_step(attach_step);
+                }
+                return;  // Early return, don't pop again
+            }
+        }
+        else if constexpr (std::is_same_v<T, AttachToTargetStep>) {
+            if (s.on_complete_callback.has_value() &&
+                *s.on_complete_callback == "attach_energy_complete") {
+                // Pop the step
+                state.pop_step();
+
+                // Perform the actual energy attachment
+                if (s.selected_target_id.has_value()) {
+                    auto& player = state.get_player(s.player_id);
+
+                    auto energy_opt = player.hand.take_card(s.card_to_attach_id);
+                    if (energy_opt.has_value()) {
+                        auto* target = player.find_pokemon(*s.selected_target_id);
+                        if (target) {
+                            target->attached_energy.push_back(std::move(*energy_opt));
+                            player.energy_attached_this_turn = true;
+                        }
+                    }
+                }
+                return;  // Early return, don't pop again
+            }
+        }
+        else if constexpr (std::is_same_v<T, SearchDeckStep>) {
+            // Pop and process search result
+            state.pop_step();
+
+            // Move selected cards to destination
+            auto& player = state.get_player(s.player_id);
+            for (const auto& card_id : s.selected_card_ids) {
+                auto card_opt = player.deck.take_card(card_id);
+                if (card_opt.has_value()) {
+                    switch (s.destination) {
+                        case ZoneType::HAND:
+                            player.hand.add_card(std::move(*card_opt));
+                            break;
+                        case ZoneType::BENCH:
+                            if (player.board.can_add_to_bench()) {
+                                const CardDef* def = card_db_.get_card(card_opt->card_id);
+                                if (def) card_opt->current_hp = def->hp;
+                                player.board.add_to_bench(std::move(*card_opt));
+                            }
+                            break;
+                        default:
+                            // For other destinations, just add to hand as fallback
+                            player.hand.add_card(std::move(*card_opt));
+                            break;
+                    }
+                }
+            }
+
+            // Shuffle deck if required
+            if (s.shuffle_after) {
+                player.deck.shuffle(rng_);
+            }
+            return;
+        }
+
+        // Default: just pop the step
         state.pop_step();
-    }
+    }, step);
 }
 
 // ============================================================================
@@ -1113,27 +1408,39 @@ int PokemonEngine::calculate_damage(const GameState& state,
         return damage;
     }
 
-    // Apply weakness (x2)
+    // Step 1: Apply damage modifiers (before weakness/resistance)
+    // These include attack bonuses from abilities, effects, etc.
+    damage = logic_registry_.apply_modifiers(state, "damage_dealt", damage);
+
+    // Step 2: Apply weakness (x2)
     if (defender_def->weakness.has_value()) {
         for (const auto& type : attacker_def->types) {
             if (type == *defender_def->weakness) {
-                damage *= 2;
+                damage *= defender_def->weakness_multiplier;
                 break;
             }
         }
     }
 
-    // Apply resistance (-30)
+    // Step 3: Apply resistance (-30)
     if (defender_def->resistance.has_value()) {
         for (const auto& type : attacker_def->types) {
             if (type == *defender_def->resistance) {
-                damage -= 30;
+                damage += defender_def->resistance_value;  // Usually -30
                 break;
             }
         }
     }
 
-    // TODO: Apply modifier effects from active_effects
+    // Step 4: Apply damage reduction modifiers (after weakness/resistance)
+    // These include abilities like Diamond Coat that reduce incoming damage
+    damage = logic_registry_.apply_modifiers(state, "damage_taken", damage);
+
+    // Step 5: Apply global damage modifiers (stadium effects, etc.)
+    auto global_modifiers = logic_registry_.scan_global_modifiers(state, "global_damage");
+    for (const auto& [card_id, source_ptr, modifier_fn] : global_modifiers) {
+        damage = modifier_fn(state, "global_damage", damage);
+    }
 
     return std::max(0, damage);
 }
@@ -1160,14 +1467,83 @@ void PokemonEngine::check_knockout(GameState& state, PlayerID player_id, const C
 }
 
 // ============================================================================
-// UTILITY
+// UTILITY - ENERGY COST VALIDATION
 // ============================================================================
+
+std::unordered_map<EnergyType, int> PokemonEngine::calculate_provided_energy(
+    const CardInstance& pokemon) const {
+    std::unordered_map<EnergyType, int> provided;
+
+    for (const auto& energy_card : pokemon.attached_energy) {
+        const CardDef* energy_def = card_db_.get_card(energy_card.card_id);
+        if (!energy_def) continue;
+
+        if (energy_def->is_basic_energy) {
+            // Basic energy provides 1 of its type
+            provided[energy_def->energy_type]++;
+        } else {
+            // Special energy - use provides list
+            for (const auto& type : energy_def->provides) {
+                provided[type]++;
+            }
+
+            // If no provides specified, default to 1 colorless
+            if (energy_def->provides.empty()) {
+                provided[EnergyType::COLORLESS]++;
+            }
+        }
+    }
+
+    return provided;
+}
+
+bool PokemonEngine::can_pay_energy_cost(
+    const std::unordered_map<EnergyType, int>& provided_energy,
+    const std::vector<EnergyType>& cost) const {
+
+    if (cost.empty()) {
+        return true;
+    }
+
+    // Copy provided energy so we can modify it
+    std::unordered_map<EnergyType, int> available = provided_energy;
+
+    // Count specific type requirements vs colorless
+    int colorless_needed = 0;
+    std::unordered_map<EnergyType, int> specific_needed;
+
+    for (const auto& type : cost) {
+        if (type == EnergyType::COLORLESS) {
+            colorless_needed++;
+        } else {
+            specific_needed[type]++;
+        }
+    }
+
+    // Step 1: Pay specific type requirements first
+    for (const auto& [type, count] : specific_needed) {
+        auto it = available.find(type);
+        int have = (it != available.end()) ? it->second : 0;
+        if (have < count) {
+            return false;  // Not enough of this specific type
+        }
+        available[type] -= count;
+    }
+
+    // Step 2: Pay colorless with any remaining energy
+    int total_remaining = 0;
+    for (const auto& [type, count] : available) {
+        total_remaining += count;
+    }
+
+    return total_remaining >= colorless_needed;
+}
 
 bool PokemonEngine::has_energy_for_attack(const CardInstance& pokemon,
                                           const std::vector<EnergyType>& cost) const {
-    // Simple check: total energy >= cost length
-    // TODO: Implement proper energy matching with Colorless wildcards
-    return pokemon.total_attached_energy() >= static_cast<int>(cost.size());
+    // Calculate provided energy with type awareness
+    auto provided = calculate_provided_energy(pokemon);
+    return can_pay_energy_cost(provided, cost);
 }
 
 int PokemonEngine::calculate_retreat_cost(const GameState& state,
@@ -1177,7 +1553,24 @@ int PokemonEngine::calculate_retreat_cost(const GameState& state,
 
     int cost = def->retreat_cost;
 
-    // TODO: Apply modifiers from tools, abilities, stadium
+    // Apply modifiers from LogicRegistry
+    // 1. Check Pokemon's own modifier (e.g., Agile ability)
+    cost = logic_registry_.apply_modifiers(state, "retreat_cost", cost);
+
+    // 2. Check global modifiers (e.g., Beach Court Stadium)
+    auto global_modifiers = logic_registry_.scan_global_modifiers(state, "global_retreat_cost");
+    for (const auto& [card_id, source_ptr, modifier_fn] : global_modifiers) {
+        cost = modifier_fn(state, "global_retreat_cost", cost);
+    }
+
+    // 3. Check attached tools (e.g., Float Stone)
+    for (const auto& tool : pokemon.attached_tools) {
+        const CardDef* tool_def = card_db_.get_card(tool.card_id);
+        if (tool_def) {
+            // Look up tool modifier in registry
+            // TODO: Add tool-specific modifier lookup
+        }
+    }
 
     return std::max(0, cost);
 }
@@ -1207,6 +1600,97 @@ bool PokemonEngine::can_evolve(const GameState& state,
     // Cannot evolve twice in one turn
     if (base.evolved_this_turn) {
         return false;
+    }
+
+    return true;
+}
+
+// ============================================================================
+// FILTER CRITERIA MATCHING
+// ============================================================================
+
+bool PokemonEngine::card_matches_filter(
+    const CardInstance& card,
+    const std::unordered_map<std::string, std::string>& filter,
+    const GameState& state,
+    const PlayerState& player) const {
+
+    if (filter.empty()) {
+        return true;  // No filter = match all
+    }
+
+    const CardDef* def = card_db_.get_card(card.card_id);
+    if (!def) return false;
+
+    // Check each filter criterion
+    for (const auto& [key, value] : filter) {
+        // Supertype filter
+        if (key == "supertype") {
+            bool match = false;
+            if (value == "Pokemon" && def->is_pokemon()) match = true;
+            if (value == "Trainer" && def->is_trainer()) match = true;
+            if (value == "Energy" && def->is_energy()) match = true;
+            if (!match) return false;
+        }
+        // Subtype filter
+        else if (key == "subtype") {
+            Subtype target_subtype = CardDatabase::parse_subtype(value);
+            bool found = std::find(def->subtypes.begin(), def->subtypes.end(),
+                                   target_subtype) != def->subtypes.end();
+            if (!found) return false;
+        }
+        // Max HP filter (for Buddy-Buddy Poffin)
+        else if (key == "max_hp") {
+            if (!def->is_pokemon()) return false;
+            int max_hp = std::stoi(value);
+            if (def->hp > max_hp) return false;
+        }
+        // Pokemon type filter
+        else if (key == "pokemon_type") {
+            if (!def->is_pokemon()) return false;
+            EnergyType target_type = CardDatabase::parse_energy_type(value);
+            bool found = std::find(def->types.begin(), def->types.end(),
+                                   target_type) != def->types.end();
+            if (!found) return false;
+        }
+        // Energy type filter
+        else if (key == "energy_type") {
+            if (!def->is_energy()) return false;
+            EnergyType target_type = CardDatabase::parse_energy_type(value);
+            if (def->energy_type != target_type) return false;
+        }
+        // Name filter (exact match)
+        else if (key == "name") {
+            if (def->name != value) return false;
+        }
+        // Evolves from filter
+        else if (key == "evolves_from") {
+            if (!def->evolves_from.has_value()) return false;
+            if (*def->evolves_from != value) return false;
+        }
+        // Rare Candy target filter (Stage 2 that evolves from a bench Pokemon)
+        else if (key == "rare_candy_target" && value == "true") {
+            if (!def->is_stage_2()) return false;
+            if (!def->evolves_from.has_value()) return false;
+
+            // Must have a valid Stage 1 that evolves from a Basic on bench
+            // This requires checking the evolution chain
+            // Simplified: just check if it's Stage 2
+        }
+        // Super Rod target filter (Pokemon or basic Energy)
+        else if (key == "super_rod_target" && value == "true") {
+            if (!def->is_pokemon() && !(def->is_energy() && def->is_basic_energy)) {
+                return false;
+            }
+        }
+        // Night Stretcher target (Pokemon)
+        else if (key == "night_stretcher_target" && value == "true") {
+            if (!def->is_pokemon()) return false;
+        }
+        // Basic Pokemon filter
+        else if (key == "is_basic" && value == "true") {
+            if (!def->is_basic_pokemon()) return false;
+        }
     }
 
     return true;

@@ -9,6 +9,7 @@
 
 #include "game_state.hpp"
 #include "card_database.hpp"
+#include "logic_registry.hpp"
 #include <random>
 
 namespace pokemon {
@@ -82,8 +83,24 @@ public:
 
     const CardDatabase& get_card_database() const { return card_db_; }
 
+    /**
+     * Load card database from JSON file.
+     * Must be called before using the engine.
+     */
+    bool load_card_database(const std::string& filepath) {
+        return card_db_.load_from_json(filepath);
+    }
+
+    // ========================================================================
+    // LOGIC REGISTRY ACCESS
+    // ========================================================================
+
+    LogicRegistry& get_logic_registry() { return logic_registry_; }
+    const LogicRegistry& get_logic_registry() const { return logic_registry_; }
+
 private:
     CardDatabase card_db_;
+    LogicRegistry logic_registry_;
     mutable std::mt19937 rng_;  // For shuffling
 
     // ========================================================================
@@ -159,8 +176,39 @@ private:
     // UTILITY
     // ========================================================================
 
+    /**
+     * Check if Pokemon has energy to pay attack cost with proper type matching.
+     *
+     * Energy matching rules:
+     * - Specific types (Fire, Water, etc.) must match exactly
+     * - Colorless can be paid with any energy type
+     * - Uses greedy matching: specific requirements first, then colorless
+     */
     bool has_energy_for_attack(const CardInstance& pokemon,
                                const std::vector<EnergyType>& cost) const;
+
+    /**
+     * Check if provided energy can pay a specific cost.
+     *
+     * @param provided_energy Map of energy type -> count
+     * @param cost Attack cost (list of energy types)
+     * @return true if cost can be paid
+     */
+    bool can_pay_energy_cost(const std::unordered_map<EnergyType, int>& provided_energy,
+                             const std::vector<EnergyType>& cost) const;
+
+    /**
+     * Calculate provided energy from a Pokemon's attached energy cards.
+     *
+     * Handles:
+     * - Basic energy (provides 1 of its type)
+     * - Special energy (may provide multiple or different types)
+     *
+     * @param pokemon Pokemon with attached energy
+     * @return Map of energy type -> count
+     */
+    std::unordered_map<EnergyType, int> calculate_provided_energy(
+        const CardInstance& pokemon) const;
 
     int calculate_retreat_cost(const GameState& state,
                               const CardInstance& pokemon) const;
@@ -168,6 +216,29 @@ private:
     bool can_evolve(const GameState& state,
                    const CardInstance& base,
                    const CardDef& evolution) const;
+
+    // ========================================================================
+    // FILTER CRITERIA MATCHING
+    // ========================================================================
+
+    /**
+     * Check if a card matches filter criteria (for resolution steps).
+     *
+     * Supports filters matching Python's _card_matches_step_filter():
+     * - supertype: "Pokemon", "Trainer", "Energy"
+     * - subtype: "Basic", "Stage 1", "Item", etc.
+     * - max_hp: Maximum HP (for Buddy-Buddy Poffin)
+     * - pokemon_type: EnergyType filter
+     * - energy_type: For energy cards
+     * - name: Exact name match
+     * - evolves_from: For evolution cards
+     * - rare_candy_target: Stage 2 that evolves from bench Pokemon
+     * - super_rod_target: Pokemon or basic Energy
+     */
+    bool card_matches_filter(const CardInstance& card,
+                            const std::unordered_map<std::string, std::string>& filter,
+                            const GameState& state,
+                            const PlayerState& player) const;
 };
 
 } // namespace pokemon

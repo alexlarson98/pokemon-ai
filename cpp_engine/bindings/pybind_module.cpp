@@ -9,6 +9,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/operators.h>
 #include <pybind11/functional.h>
+#include <iostream>
 
 #include "pokemon_engine.hpp"
 
@@ -277,6 +278,103 @@ PYBIND11_MODULE(pokemon_engine_cpp, m) {
         .def("card_count", &pokemon::CardDatabase::card_count);
 
     // ========================================================================
+    // LOGIC REGISTRY
+    // ========================================================================
+
+    // Expose result types
+    py::class_<pokemon::AttackResult>(m, "AttackResult")
+        .def(py::init<>())
+        .def_readwrite("damage_dealt", &pokemon::AttackResult::damage_dealt)
+        .def_readwrite("target_knocked_out", &pokemon::AttackResult::target_knocked_out)
+        .def_readwrite("effect_description", &pokemon::AttackResult::effect_description);
+
+    py::class_<pokemon::AbilityResult>(m, "AbilityResult")
+        .def(py::init<>())
+        .def_readwrite("activated", &pokemon::AbilityResult::activated)
+        .def_readwrite("effect_description", &pokemon::AbilityResult::effect_description);
+
+    py::class_<pokemon::TrainerResult>(m, "TrainerResult")
+        .def(py::init<>())
+        .def_readwrite("success", &pokemon::TrainerResult::success)
+        .def_readwrite("effect_description", &pokemon::TrainerResult::effect_description);
+
+    py::class_<pokemon::LogicRegistry>(m, "LogicRegistry")
+        .def(py::init<>())
+        .def("has_attack", &pokemon::LogicRegistry::has_attack)
+        .def("has_ability", &pokemon::LogicRegistry::has_ability)
+        .def("has_trainer", &pokemon::LogicRegistry::has_trainer)
+        .def("attack_count", &pokemon::LogicRegistry::attack_count)
+        .def("ability_count", &pokemon::LogicRegistry::ability_count)
+        .def("trainer_count", &pokemon::LogicRegistry::trainer_count)
+        // Register callbacks from Python
+        .def("register_attack", [](pokemon::LogicRegistry& self,
+                                   const std::string& card_id,
+                                   const std::string& attack_name,
+                                   py::function callback) {
+            self.register_attack(card_id, attack_name,
+                [callback](pokemon::GameState& state,
+                           const pokemon::CardInstance& attacker,
+                           const std::string& attack_name,
+                           pokemon::CardInstance* target) -> pokemon::AttackResult {
+                    try {
+                        py::object result = callback(py::cast(&state, py::return_value_policy::reference),
+                                                     py::cast(attacker),
+                                                     attack_name,
+                                                     target ? py::cast(target, py::return_value_policy::reference)
+                                                            : py::none());
+                        if (py::isinstance<pokemon::AttackResult>(result)) {
+                            return result.cast<pokemon::AttackResult>();
+                        }
+                        return pokemon::AttackResult{};
+                    } catch (const std::exception& e) {
+                        std::cerr << "[LogicRegistry] Attack callback error: " << e.what() << std::endl;
+                        return pokemon::AttackResult{};
+                    }
+                });
+        })
+        .def("register_ability", [](pokemon::LogicRegistry& self,
+                                    const std::string& card_id,
+                                    const std::string& ability_name,
+                                    py::function callback) {
+            self.register_ability(card_id, ability_name,
+                [callback](pokemon::GameState& state,
+                           const pokemon::CardInstance& pokemon,
+                           const std::string& ability_name) -> pokemon::AbilityResult {
+                    try {
+                        py::object result = callback(py::cast(&state, py::return_value_policy::reference),
+                                                     py::cast(pokemon),
+                                                     ability_name);
+                        if (py::isinstance<pokemon::AbilityResult>(result)) {
+                            return result.cast<pokemon::AbilityResult>();
+                        }
+                        return pokemon::AbilityResult{};
+                    } catch (const std::exception& e) {
+                        std::cerr << "[LogicRegistry] Ability callback error: " << e.what() << std::endl;
+                        return pokemon::AbilityResult{};
+                    }
+                });
+        })
+        .def("register_trainer", [](pokemon::LogicRegistry& self,
+                                    const std::string& card_id,
+                                    py::function callback) {
+            self.register_trainer(card_id,
+                [callback](pokemon::GameState& state,
+                           const pokemon::CardInstance& card) -> pokemon::TrainerResult {
+                    try {
+                        py::object result = callback(py::cast(&state, py::return_value_policy::reference),
+                                                     py::cast(card));
+                        if (py::isinstance<pokemon::TrainerResult>(result)) {
+                            return result.cast<pokemon::TrainerResult>();
+                        }
+                        return pokemon::TrainerResult{};
+                    } catch (const std::exception& e) {
+                        std::cerr << "[LogicRegistry] Trainer callback error: " << e.what() << std::endl;
+                        return pokemon::TrainerResult{};
+                    }
+                });
+        });
+
+    // ========================================================================
     // ENGINE
     // ========================================================================
 
@@ -287,6 +385,9 @@ PYBIND11_MODULE(pokemon_engine_cpp, m) {
         .def("step_inplace", &pokemon::PokemonEngine::step_inplace)
         .def("check_win_conditions", &pokemon::PokemonEngine::check_win_conditions)
         .def("get_card_database", &pokemon::PokemonEngine::get_card_database,
+             py::return_value_policy::reference)
+        .def("get_logic_registry",
+             py::overload_cast<>(&pokemon::PokemonEngine::get_logic_registry),
              py::return_value_policy::reference);
 
     // ========================================================================

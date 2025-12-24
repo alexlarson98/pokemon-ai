@@ -1,366 +1,205 @@
 # C++ Engine Architectural Review
 
-## Critical Issues Found
+## Status: ✅ BLOCKING ISSUES FIXED
 
-### 1. **Missing Logic Registry Integration**
+This document tracks the architectural review of the C++ engine against the Python reference implementation.
 
-**Python**: Uses `logic_registry` extensively for card-specific behavior:
-```python
-# Custom action generators for cards
-generator = logic_registry.get_card_logic(card.card_id, 'generator')
-if generator:
-    generated_actions = generator(state, card, player)
-```
+## Fixed Issues (Phase 1 Complete)
 
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- `engine.cpp` has TODO comments but no logic registry
-- Card effects, attack effects, ability effects all hardcoded or missing
-- Without this, **no card logic will work** (Infernal Reign, Ultra Ball, Rare Candy, etc.)
+### 1. ✅ Logic Registry Integration
 
-**Impact**: HIGH - Core functionality broken
+**Status**: FIXED
+- Created `logic_registry.hpp` and `logic_registry.cpp`
+- Supports C++ native callbacks and Python callbacks via pybind11
+- Attack, ability, and trainer effects can be registered
+- Guards, modifiers, and hooks architecture in place
 
----
+### 2. ✅ Energy Cost Validation
 
-### 2. **Missing Energy Cost Validation**
+**Status**: FIXED
+- Implemented `calculate_provided_energy()` - properly handles basic and special energy
+- Implemented `can_pay_energy_cost()` - validates type matching with Colorless wildcard
+- Updated `has_energy_for_attack()` to use the new validation
 
-**Python**: Proper energy matching with type validation:
-```python
-def _can_pay_energy_cost(self, provided_energy: Dict, cost: List[EnergyType], converted_cost: int) -> bool:
-    # Complex matching: Fire requires Fire, Colorless is wild
-```
+### 3. ✅ Stack-Based Energy Attachment
 
-**C++ Status**: ❌ **INCOMPLETE**
-```cpp
-bool PokemonEngine::has_energy_for_attack(const CardInstance& pokemon,
-                                          const std::vector<EnergyType>& cost) const {
-    // Simple check: total energy >= cost length
-    return pokemon.total_attached_energy() >= static_cast<int>(cost.size());
-}
-```
+**Status**: FIXED
+- Changed from E×T actions to single "Attach Energy" action
+- Uses resolution stack with SelectFromZoneStep + AttachToTargetStep
+- Matches Python engine's `use_stack=True` approach
 
-**Impact**: HIGH - Attacks validated incorrectly (could attack without proper energy types)
+### 4. ✅ Filter Criteria Matching
 
----
+**Status**: FIXED
+- Implemented `card_matches_filter()` in engine.cpp
+- Supports all Python filter types: supertype, subtype, max_hp, pokemon_type, energy_type, name, evolves_from, rare_candy_target, super_rod_target, is_basic
 
-### 3. **Missing Stack-Based Energy Attachment**
+### 5. ✅ JSON Parsing (nlohmann/json)
 
-**Python**: Uses resolution stack for energy attachment:
-```python
-def _get_attach_energy_actions(self, state: GameState) -> List[Action]:
-    # Returns SINGLE action that initiates resolution stack
-    return [Action(
-        action_type=ActionType.ATTACH_ENERGY,
-        player_id=player.player_id,
-        parameters={'use_stack': True},
-        display_label="Attach Energy"
-    )]
-```
+**Status**: FIXED
+- Integrated nlohmann/json via FetchContent
+- Rewrote CardDatabase with proper JSON parsing
+- Full attack/ability/weakness/resistance parsing
 
-**C++ Status**: ❌ **WRONG APPROACH**
-```cpp
-std::vector<Action> PokemonEngine::get_energy_attach_actions(const GameState& state) const {
-    // Generates E×T actions directly (old approach)
-    for (const auto& card : player.hand.cards) {
-        for (const auto* pokemon : pokemon_list) {
-            actions.push_back(Action::attach_energy(...));
-        }
-    }
-}
-```
+### 6. ✅ Attack/Ability Parsing
 
-**Impact**: MEDIUM - Higher branching factor than necessary
+**Status**: FIXED
+- `parse_attack()` - extracts cost, damage, text, damage modifiers
+- `parse_ability()` - extracts name, text, type, category detection
+- Weakness/resistance with multiplier/value
 
 ---
 
-### 4. **Missing Global Permission Checks**
+## Fixed Issues (Phase 2 Complete)
 
-**Python**: Checks for Item Lock, Ability Lock, etc.:
-```python
-if self.check_global_permission(state, 'play_item', player.player_id):
-    # Can play item
-```
+### 7. ✅ Global Permission Checks
 
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- No `check_global_permission()` method
-- No active effects parsing for locks/blocks
+**Status**: FIXED
+- Added `is_ability_blocked_by_passive()` to LogicRegistry
+- Added `check_global_block()` for global guards (Item Lock, etc.)
+- Added `scan_global_modifiers()` and `scan_global_guards()` for board scanning
+- Integrated into `get_trainer_actions()` and `get_ability_actions()`
+- Matches Python's `is_ability_blocked_by_passive()` and `check_global_block()`
 
-**Impact**: MEDIUM - Cards like Klefki's Mischievous Lock won't work
+### 8. ✅ Passive Ability Category
+
+**Status**: FIXED
+- Added "passive" category to AbilityDef (6 categories: attack, activatable, modifier, guard, hook, passive)
+- Added `PassiveCallback` and `PassiveConditionCallback` types
+- Added `register_passive()` method to LogicRegistry
+- Ability parsing now detects passive ability locks (e.g., Klefki's Mischievous Lock)
+
+### 9. ✅ Modifier Application
+
+**Status**: FIXED
+- `calculate_damage()` now applies damage modifiers (damage_dealt, damage_taken, global_damage)
+- `calculate_retreat_cost()` now applies retreat modifiers (retreat_cost, global_retreat_cost)
+- Uses proper weakness multiplier from CardDef
+
+### 10. ✅ Hook Triggering
+
+**Status**: FIXED
+- Added hook triggering in `apply_play_basic()` for on_play hooks
+- Added hook triggering in `apply_evolve()` for on_evolve hooks
+- Hooks check ability block before triggering
 
 ---
 
-### 5. **Missing Mulligan Phase Logic**
+## Remaining Issues (Phase 3 - Nice to Have)
 
-**Python**: Opponent chooses to draw or decline:
-```python
-def _get_mulligan_actions(self, state: GameState) -> List[Action]:
-    return [
-        Action(action_type=ActionType.MULLIGAN_DRAW, metadata={"draw": True}),
-        Action(action_type=ActionType.MULLIGAN_DRAW, metadata={"draw": False})
-    ]
-```
+### 11. ⚠️ Mulligan Phase Logic
 
-**C++ Status**: ❌ **INCORRECT**
-```cpp
-std::vector<Action> PokemonEngine::get_mulligan_actions(const GameState& state) const {
-    // Only generates one action, missing the choice
-    Action draw(ActionType::MULLIGAN_DRAW, player.player_id);
-    actions.push_back(draw);
-    return actions;
-}
-```
+**Python**: Opponent chooses to draw or decline
+
+**C++ Status**: Needs update to provide draw/decline choice
 
 **Impact**: LOW - Mulligan handling incomplete
 
 ---
 
-### 6. **Missing Theoretical Deck Cards (ISMCTS)**
+### 12. ⚠️ Theoretical Deck Cards (ISMCTS)
 
-**Python**: Handles imperfect information for deck searches:
-```python
-def _get_theoretical_deck_cards(self, player, step, state):
-    # Uses initial_deck_counts minus hand to show valid search options
-    # Essential for belief-based MCTS
-```
+**Python**: Handles imperfect information for deck searches
 
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- No `_get_theoretical_deck_cards()` equivalent
-- Resolution stack actions use actual deck contents only
+**C++ Status**: Not implemented - uses actual deck contents only
 
 **Impact**: MEDIUM - ISMCTS won't work correctly with hidden information
 
 ---
 
-### 7. **Missing Filter Criteria Matching**
+### 13. ✅ Functional ID Deduplication
 
-**Python**: Rich filter system for card selection:
-```python
-def _card_matches_step_filter(self, card, filter_criteria, state, player):
-    # Supports: supertype, subtype, max_hp, pokemon_type, energy_type,
-    # name, evolves_from, rare_candy_target, super_rod_target
-```
-
-**C++ Status**: ❌ **STUB ONLY**
-```cpp
-// Resolution stack has TODO: Apply filter_criteria
-// No actual filtering implemented
-```
-
-**Impact**: HIGH - Complex cards (Buddy-Buddy Poffin, Rare Candy) won't filter correctly
+**Status**: FIXED
+- Added `get_functional_id()` to CardDef
+- All deduplication now uses functional ID (not name)
+- Properly handles same-name cards with different stats (e.g., Charmander 80HP with ability vs 70HP)
 
 ---
 
-### 8. **Missing Functional ID Deduplication**
+### 14. ⚠️ Attack Cost Reduction
 
-**Python**: Deduplicates by functional ID for MCTS optimization:
-```python
-# Pidgey 50HP and Pidgey 60HP are different functional IDs
-functional_id = self._compute_functional_id(card_def)
-```
-
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- Uses card name only for deduplication
-- Different card versions treated as identical
-
-**Impact**: MEDIUM - Sub-optimal MCTS branching
-
----
-
-### 9. **Missing Dynamic Retreat Cost Calculation**
-
-**Python**: Accounts for tools and effects:
-```python
-def calculate_retreat_cost(self, state: GameState, pokemon: CardInstance) -> int:
-    # Base cost - tool modifiers - effect modifiers
-```
-
-**C++ Status**: ⚠️ **PARTIAL**
-```cpp
-int PokemonEngine::calculate_retreat_cost(const GameState& state,
-                                          const CardInstance& pokemon) const {
-    // Only returns base cost, no modifiers
-    return def->retreat_cost;
-}
-```
-
-**Impact**: LOW - Float Stone, Jet Energy retreat reduction won't work
-
----
-
-### 10. **Missing Attack Cost Calculation**
-
-**Python**: Dynamic attack cost (for cards that reduce cost):
-```python
-def calculate_attack_cost(self, state: GameState, pokemon: CardInstance, attack: 'Attack') -> int:
-    # Base cost modified by effects
-```
-
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-
+**Status**: Not implemented
 **Impact**: LOW - Cards that reduce attack costs won't work
 
 ---
 
-### 11. **Missing Stadium Actions**
+### 15. ⚠️ Stadium Actions
 
-**Python**: Some stadiums have activatable effects:
-```python
-def _get_stadium_actions(self, state: GameState) -> List[Action]:
-    # Check if stadium has generator
-```
-
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- No `get_stadium_actions()` method
-- Stadium generators not checked
-
+**Status**: Not implemented
 **Impact**: LOW - Activatable stadiums won't work
 
 ---
 
-### 12. **Missing Tool Capacity Check**
+### 16. ⚠️ Tool Capacity Check
 
-**Python**: Some Pokemon can hold multiple tools:
-```python
-max_tools = self.get_max_tool_capacity(target)
-if len(target.attached_tools) < max_tools:
-```
-
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- Assumes max 1 tool per Pokemon
-
+**Status**: Assumes max 1 tool per Pokemon
 **Impact**: LOW - Tool Box, etc. won't work
 
 ---
 
-### 13. **Missing Provided Energy Calculation**
+## Architecture Summary
 
-**Python**: Handles special energy providing multiple types:
+### Files Created/Updated
+
+1. **CMakeLists.txt** - Added nlohmann/json via FetchContent
+2. **card_database.hpp/cpp** - Full JSON parsing with attacks/abilities
+3. **logic_registry.hpp/cpp** - Card effect registration system
+4. **engine.hpp/cpp** - Energy validation, filter matching, stack-based attachment
+5. **pybind_module.cpp** - Exposed LogicRegistry to Python
+
+### Key Design Decisions
+
+1. **Python Callback Support**: LogicRegistry can accept Python functions via pybind11, allowing gradual migration of card logic
+
+2. **Stack-Based Approach**: Energy attachment and item effects use resolution stack to minimize action space
+
+3. **Reusable Filter System**: `card_matches_filter()` can be used by any resolution step
+
+4. **Type-Safe Energy Validation**: Proper matching of specific types with Colorless wildcard
+
+### Usage Example
+
 ```python
-def _calculate_provided_energy(self, pokemon: CardInstance) -> Dict[EnergyType, int]:
-    # Double Turbo provides 2 Colorless
-    # Reversal Energy provides different amounts
+from pokemon_engine_cpp import PokemonEngine, AttackResult
+
+engine = PokemonEngine()
+
+# Register Python attack handler
+def burning_darkness(state, attacker, attack_name, target):
+    result = AttackResult()
+    # Count opponent's benched Pokemon with damage
+    bench_with_damage = sum(1 for p in target.owner.board.bench if p.damage_counters > 0)
+    result.damage_dealt = 180 + (20 * bench_with_damage)
+    return result
+
+engine.get_logic_registry().register_attack("sv3-125", "Burning Darkness", burning_darkness)
+
+# Now attacks will use the registered handler
+actions = engine.get_legal_actions(state)
 ```
 
-**C++ Status**: ❌ **NOT IMPLEMENTED**
-- Just counts number of attached energy cards
-
-**Impact**: MEDIUM - Special energy cards won't work correctly
-
 ---
 
-## Structural Issues
+## Build Instructions
 
-### 14. **CardDatabase JSON Parsing is Fragile**
-
-Current implementation uses custom string parsing:
-```cpp
-std::string extract_string(const std::string& json, const std::string& key) {
-    // Simple substring search - breaks on nested objects
-}
+```batch
+cd cpp_engine
+build.bat
 ```
 
-**Recommendation**: Use nlohmann/json or rapidjson for robust parsing
-
----
-
-### 15. **Missing Attack/Ability Parsing in CardDatabase**
-
-```cpp
-// TODO: Parse attacks and abilities
+Or manually:
+```batch
+mkdir build && cd build
+cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_PYTHON_BINDINGS=ON ..
+cmake --build . --config Release --parallel
 ```
 
-Without this, CardDef won't have attacks/abilities populated.
-
 ---
 
-### 16. **No RNG Integration for Shuffling**
+## Next Steps for Full Parity
 
-Python passes RNG seed for deterministic simulation:
-```python
-def __init__(self, random_seed: Optional[int] = None):
-    if random_seed is not None:
-        random.seed(random_seed)
-```
-
-C++ has RNG but:
-- No way to pass seed from Python
-- Shuffle not integrated into game operations
-
----
-
-## Summary Prioritization
-
-### Must Fix Before Use (Blocking)
-
-1. **Logic Registry** - No card effects work
-2. **Energy Cost Validation** - Attacks broken
-3. **Filter Criteria Matching** - Complex cards broken
-4. **Attack/Ability Parsing** - CardDef incomplete
-
-### Should Fix (Functionality Gaps)
-
-5. Stack-Based Energy Attachment
-6. Global Permission Checks
-7. Theoretical Deck Cards (ISMCTS)
-8. Functional ID Deduplication
-9. Provided Energy Calculation
-
-### Nice to Have (Edge Cases)
-
-10. Mulligan Phase Logic
-11. Dynamic Retreat Cost
-12. Attack Cost Calculation
-13. Stadium Actions
-14. Tool Capacity Check
-
----
-
-## Recommended Action Plan
-
-### Phase 1: Core Fixes (Essential for basic operation)
-1. Integrate nlohmann/json for proper JSON parsing
-2. Complete CardDef parsing (attacks, abilities)
-3. Implement basic logic registry (start with Python callbacks)
-4. Fix energy cost validation
-
-### Phase 2: MCTS Optimization
-5. Implement stack-based energy attachment
-6. Add filter criteria matching
-7. Add functional ID deduplication
-
-### Phase 3: Full Feature Parity
-8. Add ISMCTS support (theoretical deck)
-9. Add global permission checks
-10. Complete effect modifier system
-
----
-
-## Architecture Recommendations
-
-### 1. Use Python Callbacks Initially
-
-Rather than reimplementing all card logic in C++, use pybind11 to call Python functions:
-
-```cpp
-// C++ calls Python for complex card logic
-py::function effect_func = logic_registry.attr("get_effect")(card_id, effect_name);
-if (!effect_func.is_none()) {
-    state = effect_func(state, attacker, defender).cast<GameState>();
-}
-```
-
-This allows incremental migration while maintaining correctness.
-
-### 2. Keep Python Engine as Reference
-
-Don't remove Python engine - use it as:
-- Reference implementation for tests
-- Fallback for unimplemented features
-- Validation against C++ results
-
-### 3. Test at Boundaries
-
-Create integration tests that compare:
-- `py_engine.get_legal_actions(state)` vs `cpp_engine.get_legal_actions(state)`
-- `py_engine.step(state, action)` vs `cpp_engine.step(state, action)`
-
-Any deviation indicates a bug.
+1. Register all Charizard EX deck card effects in logic registry
+2. Implement ISMCTS theoretical deck support
+3. Update mulligan to provide draw/decline choice
+4. Add integration tests comparing Python vs C++ engine results
+5. Add Python bindings for new passive/hook/modifier functions

@@ -9,6 +9,7 @@
 
 #include "types.hpp"
 #include <unordered_map>
+#include <nlohmann/json_fwd.hpp>
 
 namespace pokemon {
 
@@ -30,13 +31,35 @@ struct AttackDef {
 
 /**
  * Ability definition (immutable).
+ *
+ * Categories match Python's logic_registry.py:
+ * - "activatable": Player-triggered ability, generates actions (e.g., Infernal Reign)
+ * - "modifier": Continuously modifies values (retreat cost, damage, HP) (e.g., Agile)
+ * - "guard": Blocks effects/conditions (status, damage) (e.g., Insomnia)
+ * - "hook": Event-triggered (on_play, on_knockout, on_evolve) (e.g., Insta-Flock)
+ * - "passive": Passive ability lock that blocks other abilities (e.g., Mischievous Lock)
  */
 struct AbilityDef {
     std::string name;
     std::string text;
-    std::string ability_type;  // "Ability", "VSTAR Power", etc.
-    std::string category;      // "activatable", "modifier", "guard", "hook"
+    std::string ability_type;  // "Ability", "VSTAR Power", "Poke-Power", etc.
+    std::string category;      // "activatable", "modifier", "guard", "hook", "passive"
     bool is_activatable = false;
+
+    // For modifiers
+    std::string modifier_type;  // "retreat_cost", "damage", "hp", "global_retreat_cost"
+
+    // For guards
+    std::string guard_type;     // "status_condition", "damage", "effect", "global_play_item"
+
+    // For hooks
+    std::string trigger;        // "on_play", "on_knockout", "on_evolve", "on_attach_energy"
+
+    // For passives
+    std::string effect_type;    // "ability_lock", "item_lock"
+
+    // Scope: "self", "all", "opponent", "active"
+    std::string scope = "self";
 
     // Logic function name
     std::string effect_function;
@@ -57,7 +80,9 @@ struct CardDef {
     int hp = 0;
     std::vector<EnergyType> types;
     std::optional<EnergyType> weakness;
+    int weakness_multiplier = 2;  // Default x2
     std::optional<EnergyType> resistance;
+    int resistance_value = -30;   // Default -30
     int retreat_cost = 0;
     std::optional<std::string> evolves_from;
     std::vector<AttackDef> attacks;
@@ -122,6 +147,45 @@ struct CardDef {
         if (std::find(subtypes.begin(), subtypes.end(), Subtype::GX) != subtypes.end()) return 2;
         return 1;
     }
+
+    /**
+     * Compute functional ID for deduplication.
+     *
+     * Two cards with the same name but different HP, attacks, or abilities
+     * will have different functional IDs. This is critical for MCTS as
+     * Charmander 80HP with an ability is functionally different from
+     * Charmander 70HP with no ability.
+     *
+     * Format: "name|hp|attack1_cost_damage|attack2_cost_damage|ability1_name"
+     */
+    std::string get_functional_id() const {
+        std::string fid = name;
+
+        if (is_pokemon()) {
+            fid += "|" + std::to_string(hp);
+
+            // Add attack signatures
+            for (const auto& attack : attacks) {
+                fid += "|" + attack.name + "_" +
+                       std::to_string(attack.converted_energy_cost) + "_" +
+                       std::to_string(attack.base_damage);
+            }
+
+            // Add ability names
+            for (const auto& ability : abilities) {
+                fid += "|A:" + ability.name;
+            }
+        } else if (is_energy()) {
+            fid += "|E:" + std::to_string(static_cast<int>(energy_type));
+            if (is_basic_energy) fid += "_basic";
+        } else if (is_trainer()) {
+            // For trainers, include the card_id since same-name trainers
+            // could have different effects in different sets
+            fid += "|T:" + card_id;
+        }
+
+        return fid;
+    }
 };
 
 /**
@@ -162,13 +226,23 @@ public:
      */
     size_t card_count() const { return cards_.size(); }
 
+    /**
+     * Static parsing utilities - public for use by other components.
+     */
+    static Supertype parse_supertype(const std::string& s);
+    static Subtype parse_subtype(const std::string& s);
+    static EnergyType parse_energy_type(const std::string& s);
+
 private:
     std::unordered_map<CardDefID, CardDef> cards_;
 
     // Parse helpers
-    static Supertype parse_supertype(const std::string& s);
-    static Subtype parse_subtype(const std::string& s);
-    static EnergyType parse_energy_type(const std::string& s);
+    CardDef parse_card(const nlohmann::json& card_json) const;
+    void parse_pokemon_fields(const nlohmann::json& card_json, CardDef& card) const;
+    void parse_energy_fields(const nlohmann::json& card_json, CardDef& card) const;
+    void parse_trainer_fields(const nlohmann::json& card_json, CardDef& card) const;
+    AttackDef parse_attack(const nlohmann::json& attack_json) const;
+    AbilityDef parse_ability(const nlohmann::json& ability_json) const;
 };
 
 } // namespace pokemon

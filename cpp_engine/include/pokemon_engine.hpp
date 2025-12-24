@@ -24,6 +24,9 @@
 // Card database
 #include "card_database.hpp"
 
+// Logic registry
+#include "logic_registry.hpp"
+
 // Engine
 #include "engine.hpp"
 
