@@ -7,12 +7,20 @@
  * Design principle: Effects are built from composable primitives that
  * push resolution steps onto the stack. This matches the Python resolution
  * stack approach but with type-safe C++ callbacks.
+ *
+ * ARCHITECTURE (2024-12):
+ * Effect builders now support optional completion callbacks. When provided,
+ * the callback is invoked when the resolution step completes, allowing
+ * card-specific logic to be defined alongside the card rather than in the engine.
+ *
+ * See cpp_engine/docs/CARD_INTEGRATION.md for full documentation.
  */
 
 #pragma once
 
 #include "../types.hpp"
 #include "../game_state.hpp"
+#include "../resolution_step.hpp"
 #include "../logic_registry.hpp"
 #include "../card_database.hpp"
 #include <functional>
@@ -82,6 +90,7 @@ struct EffectResult {
  * @param min_count Minimum cards required (0 = optional)
  * @param destination Where cards go after selection (default: HAND)
  * @param shuffle_after Whether to shuffle deck after (default: true)
+ * @param on_complete Optional callback for card-specific completion logic
  * @return EffectResult indicating success and whether resolution is needed
  */
 EffectResult search_deck(
@@ -92,11 +101,15 @@ EffectResult search_deck(
     int count = 1,
     int min_count = 0,
     ZoneType destination = ZoneType::HAND,
-    bool shuffle_after = true
+    bool shuffle_after = true,
+    StepCompletionCallback on_complete = nullptr
 );
 
 /**
  * Search deck and put cards directly onto bench (for Nest Ball).
+ *
+ * @param on_complete Optional callback for card-specific completion logic.
+ *                    If not provided, uses default behavior (move to bench, shuffle).
  */
 EffectResult search_deck_to_bench(
     GameState& state,
@@ -104,7 +117,8 @@ EffectResult search_deck_to_bench(
     PlayerID player_id,
     const std::unordered_map<std::string, std::string>& filter,
     int count = 1,
-    int min_count = 0
+    int min_count = 0,
+    StepCompletionCallback on_complete = nullptr
 );
 
 /**

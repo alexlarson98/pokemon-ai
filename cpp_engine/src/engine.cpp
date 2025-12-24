@@ -362,6 +362,14 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
                 continue;  // Cannot play items when locked
             }
 
+            // Check card-specific playability via generator
+            if (logic_registry_.has_trainer(card.card_id)) {
+                auto gen_result = logic_registry_.invoke_generator(card.card_id, "trainer", state, card);
+                if (!gen_result.valid) {
+                    continue;  // Card cannot be played
+                }
+            }
+
             if (seen_items.find(fid) == seen_items.end()) {
                 seen_items.insert(fid);
                 actions.push_back(Action::play_item(player.player_id, card.id));
@@ -900,7 +908,61 @@ void PokemonEngine::apply_attach_energy(GameState& state, const Action& action) 
         select_energy.min_count = 1;
         select_energy.exact_count = true;
         select_energy.filter_criteria["supertype"] = "Energy";
-        select_energy.on_complete_callback = "attach_energy_select_target";
+
+        // Callback to push target selection step after energy is selected
+        select_energy.on_complete = CompletionCallback([](
+            GameState& callback_state,
+            const std::vector<CardID>& selected_cards,
+            PlayerID player_id
+        ) {
+            if (selected_cards.empty()) return;
+
+            auto& player = callback_state.get_player(player_id);
+            CardID energy_id = selected_cards[0];  // Copy for capture
+
+            // Get valid targets (all Pokemon on board)
+            std::vector<CardID> valid_targets;
+            if (player.board.active_spot.has_value()) {
+                valid_targets.push_back(player.board.active_spot->id);
+            }
+            for (const auto& bench_pokemon : player.board.bench) {
+                valid_targets.push_back(bench_pokemon.id);
+            }
+
+            // Push step to select target
+            AttachToTargetStep attach_step;
+            attach_step.source_card_id = "";
+            attach_step.source_card_name = "Attach Energy";
+            attach_step.player_id = player_id;
+            attach_step.purpose = SelectionPurpose::ATTACH_TARGET;
+            attach_step.card_to_attach_id = energy_id;
+            attach_step.valid_target_ids = std::move(valid_targets);
+
+            // Callback to actually attach the energy (capture energy_id by value)
+            attach_step.on_complete = CompletionCallback([energy_id](
+                GameState& attach_state,
+                const std::vector<CardID>& targets,
+                PlayerID attach_player_id
+            ) {
+                if (targets.empty()) return;
+
+                auto& attach_player = attach_state.get_player(attach_player_id);
+                const CardID& target_id = targets[0];
+
+                // Take the energy from hand
+                auto energy_opt = attach_player.hand.take_card(energy_id);
+                if (!energy_opt.has_value()) return;
+
+                // Find the target Pokemon and attach
+                auto* target = attach_player.find_pokemon(target_id);
+                if (!target) return;
+
+                target->attached_energy.push_back(std::move(*energy_opt));
+                attach_player.energy_attached_this_turn = true;
+            });
+
+            callback_state.push_step(attach_step);
+        });
 
         state.push_step(select_energy);
         return;
@@ -1200,75 +1262,23 @@ void PokemonEngine::process_step_completion(GameState& state) const {
     if (state.resolution_stack.empty()) return;
 
     auto step = state.resolution_stack.back();  // Copy for callback processing
+    state.pop_step();  // Always pop first
 
+    // Check if step has a custom completion callback
+    if (has_completion_callback(step)) {
+        // Card-specific completion logic - invoke the callback
+        invoke_completion_callback(step, state);
+        return;
+    }
+
+    // Default completion behaviors (when no callback is provided)
     std::visit([&](const auto& s) {
         using T = std::decay_t<decltype(s)>;
 
-        if constexpr (std::is_same_v<T, SelectFromZoneStep>) {
-            // Handle energy attachment workflow
-            if (s.on_complete_callback.has_value() &&
-                *s.on_complete_callback == "attach_energy_select_target") {
-                // Pop the selection step
-                state.pop_step();
-
-                // Get selected energy and push target selection
-                if (!s.selected_card_ids.empty()) {
-                    auto& player = state.get_player(s.player_id);
-
-                    // Collect valid Pokemon targets
-                    std::vector<CardID> target_ids;
-                    auto pokemon_list = player.board.get_all_pokemon();
-                    for (const auto* pokemon : pokemon_list) {
-                        target_ids.push_back(pokemon->id);
-                    }
-
-                    // Push AttachToTargetStep
-                    AttachToTargetStep attach_step;
-                    attach_step.source_card_id = s.selected_card_ids[0];
-                    attach_step.source_card_name = "Attach Energy";
-                    attach_step.player_id = s.player_id;
-                    attach_step.purpose = SelectionPurpose::ATTACH_TARGET;
-                    attach_step.card_to_attach_id = s.selected_card_ids[0];
-                    attach_step.valid_target_ids = std::move(target_ids);
-                    attach_step.on_complete_callback = "attach_energy_complete";
-
-                    state.push_step(attach_step);
-                }
-                return;  // Early return, don't pop again
-            }
-            // Default: just pop the step
-            state.pop_step();
-        }
-        else if constexpr (std::is_same_v<T, AttachToTargetStep>) {
-            if (s.on_complete_callback.has_value() &&
-                *s.on_complete_callback == "attach_energy_complete") {
-                // Pop the step
-                state.pop_step();
-
-                // Perform the actual energy attachment
-                if (s.selected_target_id.has_value()) {
-                    auto& player = state.get_player(s.player_id);
-
-                    auto energy_opt = player.hand.take_card(s.card_to_attach_id);
-                    if (energy_opt.has_value()) {
-                        auto* target = player.find_pokemon(*s.selected_target_id);
-                        if (target) {
-                            target->attached_energy.push_back(std::move(*energy_opt));
-                            player.energy_attached_this_turn = true;
-                        }
-                    }
-                }
-                return;  // Early return, don't pop again
-            }
-            // Default: just pop the step
-            state.pop_step();
-        }
-        else if constexpr (std::is_same_v<T, SearchDeckStep>) {
-            // Pop and process search result
-            state.pop_step();
-
-            // Move selected cards to destination
+        if constexpr (std::is_same_v<T, SearchDeckStep>) {
+            // Default SearchDeckStep behavior: move cards to destination, shuffle
             auto& player = state.get_player(s.player_id);
+
             for (const auto& card_id : s.selected_card_ids) {
                 auto card_opt = player.deck.take_card(card_id);
                 if (card_opt.has_value()) {
@@ -1284,21 +1294,27 @@ void PokemonEngine::process_step_completion(GameState& state) const {
                             }
                             break;
                         default:
-                            // For other destinations, just add to hand as fallback
                             player.hand.add_card(std::move(*card_opt));
                             break;
                     }
                 }
             }
 
-            // Shuffle deck if required
             if (s.shuffle_after) {
                 player.deck.shuffle(rng_);
             }
         }
-        else {
-            // Default: just pop the step
-            state.pop_step();
+        else if constexpr (std::is_same_v<T, SelectFromZoneStep>) {
+            // Default SelectFromZoneStep behavior: no-op (step just tracks selection)
+            // Card-specific logic should use callbacks
+        }
+        else if constexpr (std::is_same_v<T, AttachToTargetStep>) {
+            // Default AttachToTargetStep behavior: no-op
+            // Card-specific attachment logic should use callbacks
+        }
+        else if constexpr (std::is_same_v<T, EvolveTargetStep>) {
+            // Default EvolveTargetStep behavior: no-op
+            // Evolution logic should use callbacks
         }
     }, step);
 }

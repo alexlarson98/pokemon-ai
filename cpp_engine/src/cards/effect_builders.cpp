@@ -226,7 +226,8 @@ EffectResult search_deck(
     int count,
     int min_count,
     ZoneType destination,
-    bool shuffle_after
+    bool shuffle_after,
+    StepCompletionCallback on_complete
 ) {
     EffectResult result;
 
@@ -241,6 +242,11 @@ EffectResult search_deck(
     step.destination = destination;
     step.filter_criteria = filter;
     step.shuffle_after = shuffle_after;
+
+    // Set completion callback if provided
+    if (on_complete) {
+        step.on_complete = CompletionCallback(std::move(on_complete));
+    }
 
     // Push onto resolution stack
     state.push_step(step);
@@ -258,11 +264,13 @@ EffectResult search_deck_to_bench(
     PlayerID player_id,
     const std::unordered_map<std::string, std::string>& filter,
     int count,
-    int min_count
+    int min_count,
+    StepCompletionCallback on_complete
 ) {
     // For bench placement, destination is BENCH
+    // If no custom callback provided, use default behavior (engine handles it)
     return search_deck(state, source_card, player_id, filter, count, min_count,
-                       ZoneType::BENCH, true);
+                       ZoneType::BENCH, true, std::move(on_complete));
 }
 
 EffectResult discard_then(
@@ -297,9 +305,16 @@ EffectResult discard_then(
     // Exclude the source card from being discarded
     step.exclude_card_ids.push_back(source_card.id);
 
-    // Store callback name for execution after discard
-    // Note: In a full implementation, we'd store the callback in a registry
-    step.on_complete_callback = "after_discard_" + source_card.id;
+    // Set completion callback to execute the then_effect
+    if (then_effect) {
+        step.on_complete = CompletionCallback([then_effect = std::move(then_effect)](
+            GameState& state,
+            const std::vector<CardID>& /*selected*/,
+            PlayerID /*player*/
+        ) {
+            then_effect(state);
+        });
+    }
 
     state.push_step(step);
 
