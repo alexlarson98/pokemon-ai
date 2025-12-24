@@ -114,12 +114,6 @@ enum class ActionType : uint8_t {
     PROMOTE_ACTIVE,
     DISCARD_BENCH,
 
-    // Legacy interrupt actions
-    SEARCH_SELECT_COUNT,
-    SEARCH_SELECT_CARD,
-    SEARCH_CONFIRM,
-    INTERRUPT_ATTACH_ENERGY,
-
     // Resolution stack actions
     SELECT_CARD,
     CONFIRM_SELECTION,

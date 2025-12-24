@@ -28,11 +28,6 @@ FilterBuilder& FilterBuilder::pokemon_type(EnergyType type) {
     return *this;
 }
 
-FilterBuilder& FilterBuilder::energy_type(EnergyType type) {
-    criteria_["energy_type"] = to_string(type);
-    return *this;
-}
-
 FilterBuilder& FilterBuilder::max_hp(int hp) {
     criteria_["max_hp"] = std::to_string(hp);
     return *this;
@@ -48,18 +43,8 @@ FilterBuilder& FilterBuilder::evolves_from(const std::string& pokemon_name) {
     return *this;
 }
 
-FilterBuilder& FilterBuilder::is_basic(bool value) {
-    criteria_["is_basic"] = value ? "true" : "false";
-    return *this;
-}
-
-FilterBuilder& FilterBuilder::rare_candy_target(bool value) {
-    criteria_["rare_candy_target"] = value ? "true" : "false";
-    return *this;
-}
-
-FilterBuilder& FilterBuilder::super_rod_target(bool value) {
-    criteria_["super_rod_target"] = value ? "true" : "false";
+FilterBuilder& FilterBuilder::is_basic_energy(bool value) {
+    criteria_["is_basic_energy"] = value ? "true" : "false";
     return *this;
 }
 
@@ -91,14 +76,6 @@ bool card_matches_filter(
             if (value == "Tool" && !card_def.is_tool()) return false;
             if (value == "ex" && !card_def.is_ex()) return false;
         }
-        else if (key == "is_basic") {
-            bool should_be_basic = (value == "true");
-            if (card_def.is_basic_pokemon() != should_be_basic) return false;
-        }
-        else if (key == "max_hp") {
-            int max_hp = std::stoi(value);
-            if (card_def.hp > max_hp) return false;
-        }
         else if (key == "pokemon_type") {
             // Check if the card's types include the specified type
             bool found = false;
@@ -110,8 +87,9 @@ bool card_matches_filter(
             }
             if (!found) return false;
         }
-        else if (key == "energy_type") {
-            if (to_string(card_def.energy_type) != value) return false;
+        else if (key == "max_hp") {
+            int max_hp = std::stoi(value);
+            if (card_def.hp > max_hp) return false;
         }
         else if (key == "name") {
             if (card_def.name != value) return false;
@@ -122,13 +100,9 @@ bool card_matches_filter(
                 return false;
             }
         }
-        else if (key == "rare_candy_target") {
-            // Rare Candy target = Stage 2 Pokemon
-            if (!card_def.is_stage_2()) return false;
-        }
-        else if (key == "super_rod_target") {
-            // Super Rod = Pokemon or basic Energy
-            if (!card_def.is_pokemon() && !card_def.is_basic_energy) return false;
+        else if (key == "is_basic_energy") {
+            bool should_be_basic = (value == "true");
+            if (card_def.is_basic_energy != should_be_basic) return false;
         }
     }
     return true;

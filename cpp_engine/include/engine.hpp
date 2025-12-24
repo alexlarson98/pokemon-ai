@@ -111,7 +111,6 @@ private:
     std::vector<Action> get_mulligan_actions(const GameState& state) const;
     std::vector<Action> get_main_phase_actions(const GameState& state) const;
     std::vector<Action> get_resolution_stack_actions(const GameState& state) const;
-    std::vector<Action> get_interrupt_actions(const GameState& state) const;
 
     // Main phase sub-generators
     std::vector<Action> get_energy_attach_actions(const GameState& state) const;

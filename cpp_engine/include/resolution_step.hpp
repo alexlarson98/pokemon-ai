@@ -284,44 +284,4 @@ inline ResolutionStep clone_step(const ResolutionStep& step) {
     }, step);
 }
 
-// ============================================================================
-// LEGACY SUPPORT
-// ============================================================================
-
-/**
- * Legacy SearchAndAttachState - For backward compatibility.
- *
- * Used for Infernal Reign and similar multi-step abilities.
- * TODO: Migrate to new callback-based system
- */
-struct SearchAndAttachState {
-    std::string ability_name;
-    CardID source_card_id;
-    PlayerID player_id;
-
-    enum class Phase : uint8_t {
-        SELECT_COUNT,
-        SEARCH_SELECT,
-        ATTACH_ENERGY
-    };
-    Phase phase = Phase::SELECT_COUNT;
-
-    // Search parameters
-    std::unordered_map<std::string, std::string> search_filter;
-    int max_select = 3;
-
-    // State tracking
-    std::vector<CardID> selected_card_ids;
-    std::vector<CardID> cards_to_attach;
-    int current_attach_index = 0;
-    std::unordered_map<CardID, CardDefID> card_definition_map;
-
-    bool is_complete = false;
-
-    // Clone
-    SearchAndAttachState clone() const {
-        return *this;  // Struct copy
-    }
-};
-
 } // namespace pokemon

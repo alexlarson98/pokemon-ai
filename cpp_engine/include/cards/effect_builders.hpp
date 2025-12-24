@@ -45,16 +45,13 @@ namespace effects {
  */
 class FilterBuilder {
 public:
-    FilterBuilder& supertype(const std::string& type);
-    FilterBuilder& subtype(const std::string& type);
-    FilterBuilder& pokemon_type(EnergyType type);
-    FilterBuilder& energy_type(EnergyType type);
-    FilterBuilder& max_hp(int hp);
-    FilterBuilder& name(const std::string& name);
-    FilterBuilder& evolves_from(const std::string& pokemon_name);
-    FilterBuilder& is_basic(bool value = true);
-    FilterBuilder& rare_candy_target(bool value = true);
-    FilterBuilder& super_rod_target(bool value = true);
+    FilterBuilder& supertype(const std::string& type);    // "Pokemon", "Trainer", "Energy"
+    FilterBuilder& subtype(const std::string& type);      // "Basic", "Stage 1", "Item", etc.
+    FilterBuilder& pokemon_type(EnergyType type);         // Fire, Water, Colorless, etc.
+    FilterBuilder& max_hp(int hp);                        // For Buddy-Buddy Poffin
+    FilterBuilder& name(const std::string& name);         // Specific card search
+    FilterBuilder& evolves_from(const std::string& pokemon_name);  // Evolution search
+    FilterBuilder& is_basic_energy(bool value = true);    // Basic Energy cards only
 
     std::unordered_map<std::string, std::string> build() const;
 

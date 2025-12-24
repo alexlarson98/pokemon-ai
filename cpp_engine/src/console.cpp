@@ -102,13 +102,9 @@ std::string action_type_to_string(ActionType type) {
         case ActionType::TAKE_PRIZE: return "TAKE_PRIZE";
         case ActionType::PROMOTE_ACTIVE: return "PROMOTE_ACTIVE";
         case ActionType::DISCARD_BENCH: return "DISCARD_BENCH";
-        case ActionType::SEARCH_SELECT_COUNT: return "SEARCH_SELECT_COUNT";
-        case ActionType::SEARCH_SELECT_CARD: return "SEARCH_SELECT_CARD";
-        case ActionType::SEARCH_CONFIRM: return "SEARCH_CONFIRM";
         case ActionType::SELECT_CARD: return "SELECT_CARD";
         case ActionType::CONFIRM_SELECTION: return "CONFIRM";
         case ActionType::CANCEL_ACTION: return "CANCEL";
-        case ActionType::INTERRUPT_ATTACH_ENERGY: return "INTERRUPT_ATTACH";
         case ActionType::COIN_FLIP: return "COIN_FLIP";
         case ActionType::SHUFFLE: return "SHUFFLE";
         default: return "UNKNOWN";

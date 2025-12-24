@@ -33,12 +33,7 @@ std::vector<Action> PokemonEngine::get_legal_actions(const GameState& state) con
         return get_resolution_stack_actions(state);
     }
 
-    // Priority 2: Legacy interrupt (backward compatibility)
-    if (state.pending_interrupt.has_value()) {
-        return get_interrupt_actions(state);
-    }
-
-    // Priority 3: Phase-specific actions
+    // Priority 2: Phase-specific actions
     switch (state.current_phase) {
         case GamePhase::SETUP:
             return get_setup_actions(state);
@@ -679,49 +674,6 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
     return actions;
 }
 
-// ============================================================================
-// INTERRUPT ACTIONS (Legacy)
-// ============================================================================
-
-std::vector<Action> PokemonEngine::get_interrupt_actions(const GameState& state) const {
-    std::vector<Action> actions;
-
-    if (!state.pending_interrupt.has_value()) {
-        return actions;
-    }
-
-    const auto& interrupt = *state.pending_interrupt;
-
-    switch (interrupt.phase) {
-        case SearchAndAttachState::Phase::SELECT_COUNT:
-            // Generate count selection actions
-            for (int i = 0; i <= interrupt.max_select; ++i) {
-                Action a(ActionType::SEARCH_SELECT_COUNT, interrupt.player_id);
-                a.choice_index = i;
-                actions.push_back(a);
-            }
-            break;
-
-        case SearchAndAttachState::Phase::ATTACH_ENERGY:
-            // Generate attach target actions
-            {
-                const auto& player = state.get_player(interrupt.player_id);
-                auto pokemon_list = player.board.get_all_pokemon();
-
-                for (const auto* pokemon : pokemon_list) {
-                    Action a(ActionType::INTERRUPT_ATTACH_ENERGY, interrupt.player_id);
-                    a.target_id = pokemon->id;
-                    actions.push_back(a);
-                }
-            }
-            break;
-
-        default:
-            break;
-    }
-
-    return actions;
-}
 
 // ============================================================================
 // ACTION APPLICATION

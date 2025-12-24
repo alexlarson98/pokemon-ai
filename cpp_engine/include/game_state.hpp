@@ -92,9 +92,6 @@ struct GameState {
     // Resolution stack (LIFO)
     std::vector<ResolutionStep> resolution_stack;
 
-    // Legacy interrupt
-    std::optional<SearchAndAttachState> pending_interrupt;
-
     // Attack tracking
     bool attack_resolution_pending = false;
 
@@ -152,7 +149,7 @@ struct GameState {
     // ========================================================================
 
     bool has_pending_resolution() const {
-        return !resolution_stack.empty() || pending_interrupt.has_value();
+        return !resolution_stack.empty();
     }
 
     ResolutionStep* get_current_step() {
@@ -232,11 +229,6 @@ struct GameState {
         copy.resolution_stack.reserve(resolution_stack.size());
         for (const auto& step : resolution_stack) {
             copy.resolution_stack.push_back(clone_step(step));
-        }
-
-        // Clone legacy interrupt
-        if (pending_interrupt.has_value()) {
-            copy.pending_interrupt = pending_interrupt->clone();
         }
 
         copy.attack_resolution_pending = attack_resolution_pending;
