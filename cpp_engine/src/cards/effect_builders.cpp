@@ -279,14 +279,39 @@ EffectResult discard_then(
     // Exclude the source card from being discarded
     step.exclude_card_ids.push_back(source_card.id);
 
-    // Set completion callback to execute the then_effect
+    // Set completion callback to discard selected cards, then execute the then_effect
     if (then_effect) {
         step.on_complete = CompletionCallback([then_effect = std::move(then_effect)](
             GameState& state,
-            const std::vector<CardID>& /*selected*/,
-            PlayerID /*player*/
+            const std::vector<CardID>& selected,
+            PlayerID player
         ) {
+            // Move selected cards from hand to discard pile
+            auto& player_state = state.get_player(player);
+            for (const auto& card_id : selected) {
+                auto card_opt = player_state.hand.take_card(card_id);
+                if (card_opt.has_value()) {
+                    player_state.discard.add_card(std::move(*card_opt));
+                }
+            }
+
+            // Then execute the follow-up effect
             then_effect(state);
+        });
+    } else {
+        // Even without a then_effect, we still need to discard the selected cards
+        step.on_complete = CompletionCallback([](
+            GameState& state,
+            const std::vector<CardID>& selected,
+            PlayerID player
+        ) {
+            auto& player_state = state.get_player(player);
+            for (const auto& card_id : selected) {
+                auto card_opt = player_state.hand.take_card(card_id);
+                if (card_opt.has_value()) {
+                    player_state.discard.add_card(std::move(*card_opt));
+                }
+            }
         });
     }
 

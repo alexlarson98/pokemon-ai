@@ -27,9 +27,11 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv8pt5-101", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
     {"me1-167", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
 
+    {"sv1-196", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", true},
+    {"sv4pt5-91", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", true},
+    {"me1-131", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", true},
+
     // Items - Not Yet Implemented
-    {"sv1-196", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", false},
-    {"sv4pt5-91", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", false},
     {"sv1-191", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
     {"sv4pt5-89", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
     {"sv1-194", "Switch", "item", "Switch Active with Benched", false},
@@ -67,7 +69,7 @@ void register_all_trainers(LogicRegistry& registry) {
     // Register all implemented trainers
     register_nest_ball(registry);
     register_buddy_buddy_poffin(registry);
-    // register_ultra_ball(registry);
+    register_ultra_ball(registry);
     // register_rare_candy(registry);
     // register_switch(registry);
     // ...
@@ -143,9 +145,7 @@ std::optional<TrainerResult> can_play_trainer(
 
 // These will be implemented in separate files as we build them out
 
-void register_ultra_ball(LogicRegistry& registry) {
-    // TODO: Implement in ultra_ball.cpp
-}
+// register_ultra_ball is implemented in ultra_ball.cpp
 
 void register_rare_candy(LogicRegistry& registry) {
     // TODO: Implement in rare_candy.cpp

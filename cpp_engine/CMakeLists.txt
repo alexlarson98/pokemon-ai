@@ -55,6 +55,7 @@ add_library(pokemon_engine_core STATIC
     # Trainer implementations
     src/cards/trainers/items/nest_ball.cpp
     src/cards/trainers/items/buddy_buddy_poffin.cpp
+    src/cards/trainers/items/ultra_ball.cpp
 )
 
 target_include_directories(pokemon_engine_core
