@@ -60,6 +60,7 @@ bool is_trainer_implemented(const CardDefID& card_id);
 
 // Items
 void register_nest_ball(LogicRegistry& registry);
+void register_buddy_buddy_poffin(LogicRegistry& registry);
 void register_ultra_ball(LogicRegistry& registry);
 void register_rare_candy(LogicRegistry& registry);
 void register_switch(LogicRegistry& registry);

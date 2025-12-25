@@ -28,11 +28,11 @@ TEST(FilterBuilder, BasicPokemonFilter) {
 TEST(FilterBuilder, EnergyTypeFilter) {
     auto filter = FilterBuilder()
         .supertype("Energy")
-        .energy_type(EnergyType::FIRE)
+        .is_basic_energy()
         .build();
 
     TEST_ASSERT_EQ(2u, filter.size());
-    TEST_ASSERT_EQ("Fire", filter.at("energy_type"));
+    TEST_ASSERT_EQ("true", filter.at("is_basic_energy"));
 }
 
 TEST(FilterBuilder, MaxHpFilter) {
@@ -140,7 +140,7 @@ TEST(CardMatching, BasicEnergyFilter) {
     energy.energy_type = EnergyType::FIRE;
 
     auto filter = FilterBuilder()
-        .super_rod_target(true)
+        .is_basic_energy()
         .build();
 
     TEST_ASSERT_TRUE(card_matches_filter(energy, filter));

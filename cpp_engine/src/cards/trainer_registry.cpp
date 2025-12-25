@@ -22,6 +22,10 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv1-181", "Nest Ball", "item", "Search deck for Basic Pokemon to bench", true},
     {"sv1-255", "Nest Ball", "item", "Search deck for Basic Pokemon to bench", true},
     {"sv4pt5-84", "Nest Ball", "item", "Search deck for Basic Pokemon to bench", true},
+    {"sv5-144", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
+    {"sv6-223", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
+    {"sv8pt5-101", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
+    {"me1-167", "Buddy-Buddy Poffin", "item", "Search deck for up to 2 Basic Pokemon (70 HP or less) to bench", true},
 
     // Items - Not Yet Implemented
     {"sv1-196", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", false},
@@ -62,7 +66,7 @@ void register_all_trainers(LogicRegistry& registry) {
 
     // Register all implemented trainers
     register_nest_ball(registry);
-    // TODO: Add more as implemented
+    register_buddy_buddy_poffin(registry);
     // register_ultra_ball(registry);
     // register_rare_candy(registry);
     // register_switch(registry);

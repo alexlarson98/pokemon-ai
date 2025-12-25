@@ -132,7 +132,7 @@ bool can_discard_from_hand(
 
 bool has_bench_space(const GameState& state, PlayerID player_id) {
     const auto& player = state.get_player(player_id);
-    return player.board.bench.size() < 5;  // Max 5 bench Pokemon
+    return player.board.can_add_to_bench();
 }
 
 bool deck_has_matching_cards(

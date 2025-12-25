@@ -173,6 +173,404 @@ def group_duplicates(cards: List[Dict[str, Any]]) -> Dict[tuple, List[Dict[str, 
     return dict(groups)
 
 
+def get_trainer_architecture_section() -> str:
+    """Return architecture documentation specific to Trainer cards."""
+    return """## C++ Engine Architecture
+
+### Key Files
+- `cpp_engine/src/cards/trainers/items/{name}.cpp` - Item implementations
+- `cpp_engine/src/cards/trainers/supporters/{name}.cpp` - Supporter implementations
+- `cpp_engine/src/cards/trainer_registry.cpp` - Registration calls
+- `cpp_engine/include/cards/effect_builders.hpp` - Effect primitives
+- `cpp_engine/docs/CARD_INTEGRATION.md` - Full documentation
+
+### Trainer Execution Lifecycle
+Understanding the full flow is critical for correct implementation:
+
+1. **Legal Action Generation** (`get_trainer_actions()`)
+   - Engine finds Item/Supporter cards in hand
+   - Calls `generator` callback to check if card can be played
+   - If `generator.valid == true`, adds PLAY_TRAINER action to legal actions
+
+2. **Effect Execution** (`process_action()` -> `execute_trainer()`)
+   - Player selects PLAY_TRAINER action
+   - Engine calls `handler` callback
+   - Handler returns `TrainerResult` with success/requires_resolution flags
+
+3. **Resolution Stack** (if `requires_resolution == true`)
+   - Effect builders push `SearchDeckStep`, `SelectFromZoneStep`, etc. onto stack
+   - Engine enters resolution mode, generates selection actions
+   - Player makes selections -> step completes -> callback fires
+   - Stack empties -> back to normal play
+
+4. **Trainer Card Discarded** (automatic)
+   - After handler returns, engine moves trainer to discard pile
+   - You do NOT need to handle this - the engine does it
+
+### Effect Builders Available
+```cpp
+namespace effects {
+    // Search deck for cards
+    EffectResult search_deck(state, source_card, player_id, filter,
+        count=1, min_count=0, destination=HAND, shuffle_after=true, on_complete=nullptr);
+
+    // Search deck directly to bench (for Nest Ball, Poffin)
+    EffectResult search_deck_to_bench(state, source_card, player_id, filter,
+        count=1, min_count=0, on_complete=nullptr);
+
+    // Discard cards then do something (Ultra Ball)
+    EffectResult discard_then(state, source_card, player_id, discard_count, filter, then_effect);
+
+    // Draw cards
+    EffectResult draw_cards(state, player_id, count);
+
+    // Discard hand and draw (Professor's Research)
+    EffectResult discard_hand_draw(state, player_id, draw_count);
+
+    // Recover from discard to hand
+    EffectResult recover_from_discard(state, source_card, player_id, filter, count, min_count=0);
+
+    // Shuffle discard into deck (Super Rod)
+    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter, count, min_count=0);
+
+    // Switch active Pokemon
+    EffectResult switch_active(state, source_card, player_id, opponent_also=false);
+
+    // Heal damage
+    EffectResult heal_damage(state, source_card, player_id, target_id, amount);
+
+    // Validation helpers
+    bool has_bench_space(state, player_id);
+    bool can_discard_from_hand(state, player_id, count, filter={});
+    int count_matching_cards(state, db, player_id, zone, filter);
+}
+```
+
+### Filter Builder
+```cpp
+auto filter = effects::FilterBuilder()
+    .supertype("Pokemon")      // "Pokemon", "Trainer", "Energy"
+    .subtype("Basic")          // "Basic", "Stage 1", "Stage 2", "Item", etc.
+    .pokemon_type(EnergyType::FIGHTING)  // For type-specific searches
+    .max_hp(70)                // For Buddy-Buddy Poffin
+    .name("Pikachu")           // Specific card search
+    .evolves_from("Charmander") // Evolution search
+    .is_basic_energy()         // Basic Energy cards only
+    .build();
+```
+
+### Callbacks vs Default Behavior
+**Use default behavior (no callback)** when:
+- `search_deck_to_bench`: Selected cards go to bench, deck shuffles (default)
+- `search_deck` with `destination=HAND`: Cards go to hand, deck shuffles (default)
+
+**Provide a callback** when:
+- Selected cards need special handling (attach to Pokemon, evolve, etc.)
+- Additional steps must be pushed after selection
+- Side effects occur (damage counters, status conditions, etc.)
+
+### Search Semantics: Hidden vs Public Zones
+
+**Deck (hidden zone)** - "Fail to find" is ALWAYS allowed:
+- `min_count=0` lets player choose 0 cards even if valid targets exist
+- This is intentional - opponent can't verify deck contents
+- Player may strategically choose not to find anything
+
+**Discard pile / Hand (public zones)** - NO fail to find:
+- Both players can see these zones
+- If valid targets exist, player MUST select them
+- Use `min_count` equal to available targets or required count
+- Generator should check `count_matching_cards()` for playability
+
+Example - Energy Retrieval (recover 2 basic energy from discard):
+```cpp
+// Generator must verify discard has basic energy
+auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    GeneratorResult result;
+    auto filter = effects::FilterBuilder().is_basic_energy().build();
+    int available = effects::count_matching_cards(state, db, player_id, ZoneType::DISCARD, filter);
+    result.valid = available > 0;  // Must have at least 1 target
+    return result;
+};
+```
+
+### Registration Pattern
+Cards register:
+1. **TrainerCallback** - Execute the effect
+2. **GeneratorCallback** - Check if card can be played (for legal actions)
+
+```cpp
+void register_{card_name}(LogicRegistry& registry) {
+    // Handler - executes the effect
+    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
+        // Implementation
+    };
+
+    // Generator - checks playability (CRITICAL: prevents invalid actions)
+    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+        GeneratorResult result;
+        result.valid = /* can play? */;
+        result.reason = "Reason if invalid";
+        return result;
+    };
+
+    registry.register_trainer("{card_id}", handler);
+    registry.register_generator("{card_id}", "trainer", generator);
+}
+```
+
+---
+
+## Reference Implementation: Nest Ball
+
+This is a complete working example. Use it as your template.
+
+```cpp
+/**
+ * Nest Ball - Trainer Item
+ * "Search your deck for a Basic Pokemon and put it onto your Bench. Then, shuffle your deck."
+ */
+
+#include "cards/trainer_registry.hpp"
+#include "cards/effect_builders.hpp"
+
+namespace pokemon {
+namespace trainers {
+
+namespace {
+
+/**
+ * Check if Nest Ball can be played.
+ * Requirements:
+ * - Player must have bench space
+ * - (Note: Deck having Basic Pokemon is NOT required - can "fail to find")
+ */
+bool can_play_nest_ball(const GameState& state, PlayerID player_id) {
+    return effects::has_bench_space(state, player_id);
+}
+
+/**
+ * Execute Nest Ball effect.
+ * Creates a SearchDeckStep with filter for Basic Pokemon.
+ * The selected card goes directly to bench.
+ */
+TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
+    TrainerResult result;
+    PlayerID player_id = state.active_player_index;
+
+    if (!can_play_nest_ball(state, player_id)) {
+        result.success = false;
+        result.effect_description = "No bench space available";
+        return result;
+    }
+
+    // Build filter: Basic Pokemon only
+    auto filter = effects::FilterBuilder()
+        .supertype("Pokemon")
+        .subtype("Basic")
+        .build();
+
+    // Search deck, put on bench
+    // min_count = 0 because search can fail to find
+    auto effect_result = effects::search_deck_to_bench(
+        state, card, player_id, filter,
+        1,      // count: select up to 1
+        0       // min_count: can choose to find nothing
+    );
+
+    result.success = effect_result.success;
+    result.requires_resolution = effect_result.requires_resolution;
+    result.effect_description = "Search deck for a Basic Pokemon to put on bench";
+
+    return result;
+}
+
+} // anonymous namespace
+
+void register_nest_ball(LogicRegistry& registry) {
+    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
+        return execute_nest_ball(state, card);
+    };
+
+    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+        GeneratorResult result;
+        result.valid = can_play_nest_ball(state, state.active_player_index);
+        if (!result.valid) {
+            result.reason = "No bench space";
+        }
+        return result;
+    };
+
+    // Register for all printings
+    registry.register_trainer("sv1-181", handler);
+    registry.register_generator("sv1-181", "trainer", generator);
+    registry.register_trainer("sv1-255", handler);
+    registry.register_generator("sv1-255", "trainer", generator);
+    registry.register_trainer("sv4pt5-84", handler);
+    registry.register_generator("sv4pt5-84", "trainer", generator);
+}
+
+} // namespace trainers
+} // namespace pokemon
+```
+
+"""
+
+
+def get_pokemon_architecture_section(card: Dict[str, Any]) -> str:
+    """Return architecture documentation specific to Pokemon cards."""
+    has_abilities = bool(card.get('abilities', []))
+    has_complex_attacks = any(atk.get('text', '') for atk in card.get('attacks', []))
+    is_evolution = bool(card.get('evolvesFrom', ''))
+    subtypes = card.get('subtypes', [])
+    is_basic = 'Basic' in subtypes
+
+    section = """## C++ Engine Architecture
+
+### Key Files
+- `cpp_engine/src/cards/pokemon/{name}.cpp` - Pokemon-specific logic (if needed)
+- `cpp_engine/src/cards/pokemon_registry.cpp` - Registration calls
+- `cpp_engine/include/logic_registry.hpp` - Registration interfaces
+- `cpp_engine/docs/CARD_INTEGRATION.md` - Full documentation
+
+### When Pokemon Need Custom Logic
+
+**Most Pokemon require NO custom code** - the engine handles:
+- Playing Basic Pokemon to bench
+- Evolution (Stage 1/Stage 2)
+- Retreat costs
+- Standard attacks (just deal damage)
+- Weakness/Resistance calculations
+
+**Custom logic IS needed for:**
+- Abilities (once-per-turn effects, passive effects)
+- Attacks with special effects (coin flips, discard energy, status conditions)
+- Attacks with variable damage (based on energy, cards in hand, etc.)
+
+"""
+
+    if has_abilities:
+        section += """### Ability Registration
+
+Abilities are registered with `LogicRegistry::register_ability()`:
+
+```cpp
+void register_{pokemon_name}(LogicRegistry& registry) {
+    // Register ability handler
+    registry.register_ability(
+        "{card_id}",
+        "{ability_name}",
+        [](GameState& state, const CardInstance& source) -> AbilityResult {
+            AbilityResult result;
+            PlayerID player_id = source.owner_id;
+
+            // Check if ability can be used (once per turn, conditions, etc.)
+            // Implement ability effect
+            // May push resolution steps for selections
+
+            result.success = true;
+            result.effect_description = "Ability effect description";
+            return result;
+        }
+    );
+
+    // Also register generator to check if ability can be activated
+    registry.register_generator(
+        "{card_id}",
+        "ability:{ability_name}",
+        [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+            GeneratorResult result;
+            // Check conditions for ability activation
+            result.valid = /* can activate? */;
+            return result;
+        }
+    );
+}
+```
+
+"""
+
+    if has_complex_attacks:
+        section += """### Attack Registration
+
+Attacks with special effects are registered with `LogicRegistry::register_attack()`:
+
+```cpp
+void register_{pokemon_name}(LogicRegistry& registry) {
+    registry.register_attack(
+        "{card_id}",
+        "{attack_name}",
+        [](GameState& state, const CardInstance& attacker,
+           CardInstance& defender, int base_damage) -> AttackResult {
+            AttackResult result;
+            result.damage = base_damage;
+
+            // Add special effects:
+            // - Coin flips: state.flip_coin()
+            // - Discard energy: state.discard_attached_energy(...)
+            // - Status conditions: defender.apply_status(...)
+            // - Self damage: attacker.add_damage(...)
+
+            result.effect_description = "Attack effect";
+            return result;
+        }
+    );
+}
+```
+
+### Common Attack Patterns
+
+**Coin flip for effect:**
+```cpp
+if (state.flip_coin()) {
+    // Effect happens
+}
+```
+
+**Discard energy from self:**
+```cpp
+// Discard 2 energy attached to this Pokemon
+state.discard_attached_energy(attacker, 2);
+```
+
+**Apply status condition:**
+```cpp
+defender.apply_status(StatusCondition::PARALYZED);
+```
+
+**Variable damage based on conditions:**
+```cpp
+int energy_count = attacker.attached_energy.size();
+result.damage = base_damage + (20 * energy_count);
+```
+
+"""
+
+    if is_evolution:
+        section += """### Evolution Notes
+
+This is an evolution Pokemon. The engine handles:
+- Checking `evolvesFrom` matches a Pokemon in play
+- Evolution sickness (can't evolve same turn played)
+- Moving the evolution card onto the basic
+
+No custom registration needed for standard evolution behavior.
+
+"""
+    elif is_basic:
+        section += """### Basic Pokemon Notes
+
+This is a Basic Pokemon. The engine handles:
+- Playing from hand to bench
+- No evolution requirements
+
+No custom registration needed for standard play behavior.
+
+"""
+
+    return section
+
+
 def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     """Generate a comprehensive C++ implementation prompt for a card."""
 
@@ -234,7 +632,9 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                     prompt += "### Detected Effect Patterns\n"
                     prompt += f"- **Effect Builders:** `{', '.join(patterns['effect_builders'])}`\n"
                     if patterns['filter_criteria']:
-                        prompt += f"- **Filter Criteria:** `FilterBuilder(){'.'.join(patterns['filter_criteria'])}.build()`\n"
+                        # Join filter methods - they already start with '.'
+                        filter_chain = ''.join(patterns['filter_criteria'])
+                        prompt += f"- **Filter Criteria:** `FilterBuilder(){filter_chain}.build()`\n"
                     if patterns['notes']:
                         for note in patterns['notes']:
                             prompt += f"- {note}\n"
@@ -262,117 +662,17 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
                         prompt += f"> {text}\n"
                     prompt += "\n"
 
-    # Architecture guidance
-    prompt += """## C++ Engine Architecture
-
-### Key Files
-- `cpp_engine/src/cards/trainers/items/{name}.cpp` - Item implementations
-- `cpp_engine/src/cards/trainers/supporters/{name}.cpp` - Supporter implementations
-- `cpp_engine/src/cards/trainer_registry.cpp` - Registration calls
-- `cpp_engine/include/cards/effect_builders.hpp` - Effect primitives
-- `cpp_engine/docs/CARD_INTEGRATION.md` - Full documentation
-
-### Callback-Based Step Completion
-The engine uses **callbacks** for step completion, NOT string-based dispatch:
-
-```cpp
-// Callback signature
-using StepCompletionCallback = std::function<void(
-    GameState& state,
-    const std::vector<CardID>& selected_cards,
-    PlayerID player_id
-)>;
-
-// Usage in effect builders
-step.on_complete = CompletionCallback([](GameState& state,
-    const std::vector<CardID>& selected, PlayerID player) {
-    // Card-specific completion logic
-});
-```
-
-### Effect Builders Available
-```cpp
-namespace effects {
-    // Search deck for cards
-    EffectResult search_deck(state, source_card, player_id, filter,
-        count=1, min_count=0, destination=HAND, shuffle_after=true, on_complete=nullptr);
-
-    // Search deck directly to bench (for Nest Ball, Poffin)
-    EffectResult search_deck_to_bench(state, source_card, player_id, filter,
-        count=1, min_count=0, on_complete=nullptr);
-
-    // Discard cards then do something (Ultra Ball)
-    EffectResult discard_then(state, source_card, player_id, discard_count, filter, then_effect);
-
-    // Draw cards
-    EffectResult draw_cards(state, player_id, count);
-
-    // Discard hand and draw (Professor's Research)
-    EffectResult discard_hand_draw(state, player_id, draw_count);
-
-    // Recover from discard to hand
-    EffectResult recover_from_discard(state, source_card, player_id, filter, count, min_count=0);
-
-    // Shuffle discard into deck (Super Rod)
-    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter, count, min_count=0);
-
-    // Switch active Pokemon
-    EffectResult switch_active(state, source_card, player_id, opponent_also=false);
-
-    // Heal damage
-    EffectResult heal_damage(state, source_card, player_id, target_id, amount);
-
-    // Validation helpers
-    bool has_bench_space(state, player_id);
-    bool can_discard_from_hand(state, player_id, count, filter={});
-    int count_matching_cards(state, db, player_id, zone, filter);
-}
-```
-
-### Filter Builder
-```cpp
-auto filter = effects::FilterBuilder()
-    .supertype("Pokemon")      // "Pokemon", "Trainer", "Energy"
-    .subtype("Basic")          // "Basic", "Stage 1", "Stage 2", "Item", etc.
-    .max_hp(70)                // For Buddy-Buddy Poffin
-    .name("Pikachu")           // Specific card search
-    .evolves_from("Charmander") // Evolution search
-    .is_basic_energy()         // Basic Energy cards only
-    .build();
-```
-
-### Registration Pattern
-Cards register:
-1. **TrainerCallback** - Execute the effect
-2. **GeneratorCallback** - Check if card can be played (for legal actions)
-
-```cpp
-void register_{card_name}(LogicRegistry& registry) {{
-    // Handler - executes the effect
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {{
-        // Implementation
-    }};
-
-    // Generator - checks playability
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {{
-        GeneratorResult result;
-        result.valid = /* can play? */;
-        result.reason = "Reason if invalid";
-        return result;
-    }};
-
-    registry.register_trainer("{card_id}", handler);
-    registry.register_generator("{card_id}", "trainer", generator);
-}}
-```
-
-"""
-
-    # Implementation template
+    # Get card info for architecture section
     first_card = list(card_groups.values())[0][0]
     supertype = first_card.get('supertype', '')
     subtypes = first_card.get('subtypes', [])
     all_card_ids = [c.get('id', '') for cards in card_groups.values() for c in cards]
+
+    # Architecture guidance - different for Trainer vs Pokemon
+    if supertype == 'Trainer':
+        prompt += get_trainer_architecture_section()
+    elif supertype == 'Pokemon':
+        prompt += get_pokemon_architecture_section(first_card)
 
     if supertype == 'Trainer':
         subtype_folder = 'items' if 'Item' in subtypes else 'supporters' if 'Supporter' in subtypes else 'stadiums'
@@ -480,15 +780,174 @@ void register_all_trainers(LogicRegistry& registry) {{
     trainers::register_{card_snake}(registry);
 }}
 ```
-"""
 
-    prompt += f"""
-## Checklist
+## Implementation Checklist
+
+### Core Implementation
 - [ ] Implement `can_play_{card_snake}()` with proper validation
+  - Check bench space if putting Pokemon on bench
+  - Check discard cost if card requires discarding
+  - Do NOT check if deck has targets (fail-to-find is legal)
 - [ ] Implement `execute_{card_snake}()` using effect builders
+  - Use appropriate `effects::` helper
+  - Set correct count/min_count
+  - Build correct filter criteria
 - [ ] Register all card IDs: `{', '.join(all_card_ids)}`
 - [ ] Add registration call to `trainer_registry.cpp`
-- [ ] Build and test with console
+
+### Testing
+- [ ] Build: `cmake --build build --config Release`
+- [ ] Run console: `build/Release/pokemon_console.exe`
+- [ ] Verify card appears in legal actions when playable
+- [ ] Verify card does NOT appear when conditions aren't met
+- [ ] Test the resolution flow (make selections)
+- [ ] Verify deck is shuffled after search (if applicable)
+- [ ] Verify card goes to discard after playing
+
+### Common Issues
+- **Card always shows as playable**: Generator not registered or not checking conditions
+- **Card never shows as playable**: Generator returning false incorrectly
+- **Crash on play**: Handler not handling edge cases (empty deck, etc.)
+- **Resolution stuck**: Effect builder not pushing steps correctly
+"""
+
+    elif supertype == 'Pokemon':
+        # Determine what custom logic this Pokemon needs
+        has_abilities = bool(first_card.get('abilities', []))
+        has_complex_attacks = any(atk.get('text', '') for atk in first_card.get('attacks', []))
+        needs_custom_logic = has_abilities or has_complex_attacks
+
+        if needs_custom_logic:
+            prompt += f"""## Implementation Template
+
+### File: `cpp_engine/src/cards/pokemon/{card_snake}.cpp`
+
+```cpp
+/**
+ * {card_name} - Pokemon
+ *
+ * Card IDs: {', '.join(all_card_ids)}
+ */
+
+#include "logic_registry.hpp"
+#include "game_state.hpp"
+
+namespace pokemon {{
+namespace cards {{
+
+void register_{card_snake}(LogicRegistry& registry) {{
+"""
+            # Add ability registration if needed
+            for ability in first_card.get('abilities', []):
+                ability_name = ability.get('name', 'Unknown')
+                ability_text = ability.get('text', '')
+                prompt += f"""
+    // Ability: {ability_name}
+    // "{ability_text}"
+    registry.register_ability(
+        "{all_card_ids[0]}",
+        "{ability_name}",
+        [](GameState& state, const CardInstance& source) -> AbilityResult {{
+            AbilityResult result;
+            // TODO: Implement ability logic
+            result.success = true;
+            return result;
+        }}
+    );
+"""
+
+            # Add attack registration if needed
+            for attack in first_card.get('attacks', []):
+                if attack.get('text', ''):  # Only complex attacks
+                    attack_name = attack.get('name', 'Unknown')
+                    attack_text = attack.get('text', '')
+                    attack_damage = attack.get('damage', '0')
+                    prompt += f"""
+    // Attack: {attack_name} - {attack_damage}
+    // "{attack_text}"
+    registry.register_attack(
+        "{all_card_ids[0]}",
+        "{attack_name}",
+        [](GameState& state, const CardInstance& attacker,
+           CardInstance& defender, int base_damage) -> AttackResult {{
+            AttackResult result;
+            result.damage = base_damage;
+            // TODO: Implement attack special effect
+            return result;
+        }}
+    );
+"""
+
+            prompt += f"""
+    // Register for all printings
+"""
+            for card_id in all_card_ids[1:]:  # Skip first, already used above
+                prompt += f'    // Also register for: {card_id}\n'
+
+            prompt += f"""}}
+
+}} // namespace cards
+}} // namespace pokemon
+```
+
+### Add to `pokemon_registry.cpp`
+
+```cpp
+#include "cards/pokemon/{card_snake}.cpp"
+
+void register_all_pokemon(LogicRegistry& registry) {{
+    // ... existing registrations ...
+    cards::register_{card_snake}(registry);
+}}
+```
+
+## Implementation Checklist
+
+### Core Implementation
+"""
+            if has_abilities:
+                prompt += f"""- [ ] Implement ability handler(s)
+  - Check once-per-turn restrictions if applicable
+  - Implement the ability effect
+  - Register generator for ability activation check
+"""
+            if has_complex_attacks:
+                prompt += f"""- [ ] Implement attack handler(s) with special effects
+  - Handle coin flips, energy discards, status conditions
+  - Calculate variable damage if applicable
+"""
+            prompt += f"""- [ ] Register all card IDs: `{', '.join(all_card_ids)}`
+- [ ] Add registration call to `pokemon_registry.cpp`
+
+### Testing
+- [ ] Build: `cmake --build build --config Release`
+- [ ] Run console: `build/Release/pokemon_console.exe`
+"""
+            if has_abilities:
+                prompt += """- [ ] Verify ability appears in legal actions when conditions are met
+- [ ] Verify ability does NOT appear when already used this turn (if once-per-turn)
+- [ ] Test ability effect resolves correctly
+"""
+            if has_complex_attacks:
+                prompt += """- [ ] Verify attack special effects trigger correctly
+- [ ] Test coin flips, energy discards, status conditions as applicable
+"""
+
+        else:
+            # No custom logic needed
+            prompt += f"""## Implementation Notes
+
+**This Pokemon requires NO custom code.**
+
+The engine automatically handles:
+- Playing to bench (Basic) / Evolution
+- Standard attacks (damage only)
+- Retreat costs
+- Weakness/Resistance
+
+Card IDs: `{', '.join(all_card_ids)}`
+
+Simply ensure the card data exists in the card database JSON.
 """
 
     return prompt
@@ -525,7 +984,11 @@ def main():
 
     print(f"Generated prompt for '{card_name}' at {output_file}")
     print("\n" + "=" * 60 + "\n")
-    print(prompt)
+    # Handle unicode characters on Windows console
+    try:
+        print(prompt)
+    except UnicodeEncodeError:
+        print(prompt.encode('utf-8', errors='replace').decode('utf-8'))
 
 
 if __name__ == '__main__':
