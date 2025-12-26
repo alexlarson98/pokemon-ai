@@ -53,6 +53,10 @@ public:
     FilterBuilder& evolves_from(const std::string& pokemon_name);  // Evolution search
     FilterBuilder& is_basic_energy(bool value = true);    // Basic Energy cards only
 
+    // Compound filters for common card patterns
+    FilterBuilder& pokemon_or_basic_energy();             // Super Rod, Night Stretcher (Pokemon choice)
+    FilterBuilder& is_supporter();                        // Pal Pad
+
     std::unordered_map<std::string, std::string> build() const;
 
 private:
@@ -161,7 +165,7 @@ EffectResult discard_hand_draw(
  * Shuffle cards from discard pile into deck.
  * Used by Super Rod, Night Stretcher.
  *
- * @param filter Filter for what can be shuffled back
+ * @param filter Filter for what can be shuffled back (string-based)
  * @param count Number of cards to shuffle back
  */
 EffectResult shuffle_discard_to_deck(
@@ -169,6 +173,28 @@ EffectResult shuffle_discard_to_deck(
     const CardInstance& source_card,
     PlayerID player_id,
     const std::unordered_map<std::string, std::string>& filter,
+    int count,
+    int min_count = 0
+);
+
+/**
+ * Shuffle cards from discard pile into deck (predicate version).
+ * Used by Super Rod, Night Stretcher - allows complex filter logic.
+ *
+ * Example:
+ *   shuffle_discard_to_deck(state, card, player_id,
+ *       [](const CardDef& def) {
+ *           return def.is_pokemon() || (def.is_energy() && def.is_basic_energy);
+ *       }, 3, 0);
+ *
+ * @param filter_fn Predicate function for card matching
+ * @param count Number of cards to shuffle back
+ */
+EffectResult shuffle_discard_to_deck(
+    GameState& state,
+    const CardInstance& source_card,
+    PlayerID player_id,
+    std::function<bool(const CardDef&)> filter_fn,
     int count,
     int min_count = 0
 );

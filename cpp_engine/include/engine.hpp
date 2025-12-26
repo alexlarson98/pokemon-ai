@@ -87,9 +87,7 @@ public:
      * Load card database from JSON file.
      * Must be called before using the engine.
      */
-    bool load_card_database(const std::string& filepath) {
-        return card_db_.load_from_json(filepath);
-    }
+    bool load_card_database(const std::string& filepath);
 
     // ========================================================================
     // LOGIC REGISTRY ACCESS

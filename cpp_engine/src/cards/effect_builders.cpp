@@ -48,6 +48,17 @@ FilterBuilder& FilterBuilder::is_basic_energy(bool value) {
     return *this;
 }
 
+FilterBuilder& FilterBuilder::pokemon_or_basic_energy() {
+    criteria_["pokemon_or_basic_energy"] = "true";
+    return *this;
+}
+
+FilterBuilder& FilterBuilder::is_supporter() {
+    criteria_["supertype"] = "Trainer";
+    criteria_["subtype"] = "Supporter";
+    return *this;
+}
+
 std::unordered_map<std::string, std::string> FilterBuilder::build() const {
     return criteria_;
 }
@@ -103,6 +114,12 @@ bool card_matches_filter(
         else if (key == "is_basic_energy") {
             bool should_be_basic = (value == "true");
             if (card_def.is_basic_energy != should_be_basic) return false;
+        }
+        else if (key == "pokemon_or_basic_energy" && value == "true") {
+            // OR logic: must be Pokemon OR basic Energy
+            if (!card_def.is_pokemon() && !(card_def.is_energy() && card_def.is_basic_energy)) {
+                return false;
+            }
         }
     }
     return true;
@@ -387,6 +404,76 @@ EffectResult shuffle_discard_to_deck(
     step.count = count;
     step.min_count = min_count;
     step.filter_criteria = filter;
+
+    // Set completion callback to move selected cards from discard to deck and shuffle
+    step.on_complete = CompletionCallback([](
+        GameState& state,
+        const std::vector<CardID>& selected,
+        PlayerID player
+    ) {
+        auto& player_state = state.get_player(player);
+
+        // Move selected cards from discard to deck
+        for (const auto& card_id : selected) {
+            auto card_opt = player_state.discard.take_card(card_id);
+            if (card_opt.has_value()) {
+                player_state.deck.add_card(std::move(*card_opt));
+            }
+        }
+
+        // Always shuffle deck after
+        player_state.deck.shuffle(state.rng);
+    });
+
+    state.push_step(step);
+
+    result.success = true;
+    result.requires_resolution = true;
+    result.message = "Select up to " + std::to_string(count) + " card(s) from discard";
+
+    return result;
+}
+
+EffectResult shuffle_discard_to_deck(
+    GameState& state,
+    const CardInstance& source_card,
+    PlayerID player_id,
+    std::function<bool(const CardDef&)> filter_fn,
+    int count,
+    int min_count
+) {
+    EffectResult result;
+
+    // Create selection step for discard pile with predicate filter
+    SelectFromZoneStep step;
+    step.source_card_id = source_card.id;
+    step.source_card_name = source_card.card_id;
+    step.player_id = player_id;
+    step.purpose = SelectionPurpose::RECOVER_TO_DECK;
+    step.zone = ZoneType::DISCARD;
+    step.count = count;
+    step.min_count = min_count;
+    step.filter_predicate = FilterPredicate(std::move(filter_fn));  // Use predicate, not string filter
+
+    // Set completion callback to move selected cards from discard to deck and shuffle
+    step.on_complete = CompletionCallback([](
+        GameState& state,
+        const std::vector<CardID>& selected,
+        PlayerID player
+    ) {
+        auto& player_state = state.get_player(player);
+
+        // Move selected cards from discard to deck
+        for (const auto& card_id : selected) {
+            auto card_opt = player_state.discard.take_card(card_id);
+            if (card_opt.has_value()) {
+                player_state.deck.add_card(std::move(*card_opt));
+            }
+        }
+
+        // Always shuffle deck after
+        player_state.deck.shuffle(state.rng);
+    });
 
     state.push_step(step);
 

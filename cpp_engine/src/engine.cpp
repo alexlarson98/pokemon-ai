@@ -12,10 +12,22 @@
 
 namespace pokemon {
 
+// External global card database pointer (defined in trainer_registry.cpp)
+extern const CardDatabase* g_card_db;
+
 PokemonEngine::PokemonEngine() {
     // Seed RNG with current time
     auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     rng_.seed(static_cast<std::mt19937::result_type>(seed));
+}
+
+bool PokemonEngine::load_card_database(const std::string& filepath) {
+    bool success = card_db_.load_from_json(filepath);
+    if (success) {
+        // Set global pointer for generator callbacks
+        g_card_db = &card_db_;
+    }
+    return success;
 }
 
 // ============================================================================
@@ -594,15 +606,19 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
                         s.selected_card_ids.end(), card.id) != s.selected_card_ids.end();
                     if (selected) continue;
 
-                    // Apply filter_criteria
-                    if (!s.filter_criteria.empty()) {
+                    // Apply filter - predicate takes precedence over string criteria
+                    const CardDef* def = card_db_.get_card(card.card_id);
+                    if (s.filter_predicate.has_value()) {
+                        if (!def || !s.filter_predicate.matches(*def)) {
+                            continue;
+                        }
+                    } else if (!s.filter_criteria.empty()) {
                         if (!card_matches_filter(card, s.filter_criteria, state, player)) {
                             continue;
                         }
                     }
 
                     // Deduplicate by functional ID
-                    const CardDef* def = card_db_.get_card(card.card_id);
                     if (def) {
                         std::string fid = def->get_functional_id();
                         if (seen_functional_ids.count(fid) > 0) continue;
@@ -631,15 +647,19 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
                     s.selected_card_ids.end(), card.id) != s.selected_card_ids.end();
                 if (selected) continue;
 
-                // Apply filter_criteria
-                if (!s.filter_criteria.empty()) {
+                // Apply filter - predicate takes precedence over string criteria
+                const CardDef* def = card_db_.get_card(card.card_id);
+                if (s.filter_predicate.has_value()) {
+                    if (!def || !s.filter_predicate.matches(*def)) {
+                        continue;
+                    }
+                } else if (!s.filter_criteria.empty()) {
                     if (!card_matches_filter(card, s.filter_criteria, state, player)) {
                         continue;
                     }
                 }
 
                 // Deduplicate by functional ID
-                const CardDef* def = card_db_.get_card(card.card_id);
                 if (def) {
                     std::string fid = def->get_functional_id();
                     if (seen_functional_ids.count(fid) > 0) continue;
@@ -1681,7 +1701,13 @@ bool PokemonEngine::card_matches_filter(
             // This requires checking the evolution chain
             // Simplified: just check if it's Stage 2
         }
-        // Super Rod target filter (Pokemon or basic Energy)
+        // Pokemon OR basic Energy filter (Super Rod, Night Stretcher Pokemon choice)
+        else if (key == "pokemon_or_basic_energy" && value == "true") {
+            if (!def->is_pokemon() && !(def->is_energy() && def->is_basic_energy)) {
+                return false;
+            }
+        }
+        // Legacy alias for backward compatibility
         else if (key == "super_rod_target" && value == "true") {
             if (!def->is_pokemon() && !(def->is_energy() && def->is_basic_energy)) {
                 return false;

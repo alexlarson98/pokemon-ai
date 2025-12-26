@@ -11,6 +11,7 @@
 #include "resolution_step.hpp"
 #include "action.hpp"
 #include <array>
+#include <random>
 
 namespace pokemon {
 
@@ -88,6 +89,9 @@ struct GameState {
     // Metadata
     std::optional<uint64_t> random_seed;
     std::vector<std::string> move_history;
+
+    // RNG for game randomness (mutable since it changes state when used)
+    mutable std::mt19937 rng;
 
     // Resolution stack (LIFO)
     std::vector<ResolutionStep> resolution_stack;
@@ -224,6 +228,7 @@ struct GameState {
         copy.last_turn_metadata = last_turn_metadata;
         copy.random_seed = random_seed;
         copy.move_history = move_history;
+        copy.rng = rng;  // Copy RNG state for deterministic cloning
 
         // Clone resolution stack
         copy.resolution_stack.reserve(resolution_stack.size());

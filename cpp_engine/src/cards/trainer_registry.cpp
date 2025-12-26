@@ -8,6 +8,11 @@
 #include <algorithm>
 
 namespace pokemon {
+
+// Global card database pointer for generator callbacks
+// Set by PokemonEngine when initialized
+const CardDatabase* g_card_db = nullptr;
+
 namespace trainers {
 
 // ============================================================================
@@ -31,12 +36,13 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv4pt5-91", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", true},
     {"me1-131", "Ultra Ball", "item", "Discard 2, search any Pokemon to hand", true},
 
+    {"sv2-188", "Super Rod", "item", "Shuffle up to 3 Pokemon/Energy from discard to deck", true},
+    {"sv2-276", "Super Rod", "item", "Shuffle up to 3 Pokemon/Energy from discard to deck", true},
+
     // Items - Not Yet Implemented
     {"sv1-191", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
     {"sv4pt5-89", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
     {"sv1-194", "Switch", "item", "Switch Active with Benched", false},
-    {"sv4-173", "Super Rod", "item", "Shuffle 3 Pokemon/Energy from discard to deck", false},
-    {"sv4pt5-90", "Super Rod", "item", "Shuffle 3 Pokemon/Energy from discard to deck", false},
     {"sv1-171", "Energy Retrieval", "item", "Recover 2 basic Energy from discard", false},
     {"sv3-178", "Night Stretcher", "item", "Recover Pokemon or Energy from discard", false},
     {"sv1-188", "Potion", "item", "Heal 30 damage from 1 Pokemon", false},
@@ -70,6 +76,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_nest_ball(registry);
     register_buddy_buddy_poffin(registry);
     register_ultra_ball(registry);
+    register_super_rod(registry);
     // register_rare_candy(registry);
     // register_switch(registry);
     // ...
@@ -159,9 +166,7 @@ void register_potion(LogicRegistry& registry) {
     // TODO: Implement in potion.cpp
 }
 
-void register_super_rod(LogicRegistry& registry) {
-    // TODO: Implement in super_rod.cpp
-}
+// register_super_rod is implemented in super_rod.cpp
 
 void register_energy_retrieval(LogicRegistry& registry) {
     // TODO: Implement in energy_retrieval.cpp

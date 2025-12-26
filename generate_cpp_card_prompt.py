@@ -230,8 +230,11 @@ namespace effects {
     // Recover from discard to hand
     EffectResult recover_from_discard(state, source_card, player_id, filter, count, min_count=0);
 
-    // Shuffle discard into deck (Super Rod)
+    // Shuffle discard into deck - TWO VERSIONS:
+    // 1. String-based filter (simple patterns)
     EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter, count, min_count=0);
+    // 2. Predicate-based filter (complex OR logic) - PREFERRED for compound filters
+    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter_fn, count, min_count=0);
 
     // Switch active Pokemon
     EffectResult switch_active(state, source_card, player_id, opponent_also=false);
@@ -246,7 +249,8 @@ namespace effects {
 }
 ```
 
-### Filter Builder
+### Filter Builder (Simple Patterns)
+For simple AND filters, use FilterBuilder:
 ```cpp
 auto filter = effects::FilterBuilder()
     .supertype("Pokemon")      // "Pokemon", "Trainer", "Energy"
@@ -256,8 +260,40 @@ auto filter = effects::FilterBuilder()
     .name("Pikachu")           // Specific card search
     .evolves_from("Charmander") // Evolution search
     .is_basic_energy()         // Basic Energy cards only
+    .is_supporter()            // Supporter trainers (for Pal Pad)
+    .pokemon_or_basic_energy() // Pokemon OR basic Energy (Super Rod shortcut)
     .build();
 ```
+
+### Predicate Filters (Complex Patterns - PREFERRED)
+For complex filter logic (especially OR conditions), use lambda predicates:
+```cpp
+#include "card_database.hpp"  // For CardDef
+
+// Example: Super Rod - Pokemon OR basic Energy
+auto effect_result = effects::shuffle_discard_to_deck(
+    state, card, player_id,
+    [](const CardDef& def) {
+        return def.is_pokemon() || (def.is_energy() && def.is_basic_energy);
+    },
+    3,  // count
+    0   // min_count
+);
+
+// Example: Night Stretcher - Pokemon only (could also use FilterBuilder)
+auto effect_result = effects::shuffle_discard_to_deck(
+    state, card, player_id,
+    [](const CardDef& def) { return def.is_pokemon(); },
+    1, 0
+);
+```
+
+**When to use predicates vs FilterBuilder:**
+- **FilterBuilder**: Simple AND patterns (Basic Pokemon, Pokemon with ≤70 HP, etc.)
+- **Predicate**: Complex OR patterns, compound conditions, or any logic that FilterBuilder can't express
+
+The predicate approach keeps filter logic with the card implementation rather than adding
+card-specific keys to the engine, making the codebase more maintainable.
 
 ### Callbacks vs Default Behavior
 **Use default behavior (no callback)** when:
@@ -324,6 +360,11 @@ void register_{card_name}(LogicRegistry& registry) {
 ## Reference Implementation: Nest Ball
 
 This is a complete working example. Use it as your template.
+
+**CRITICAL: Card IDs must match your card!**
+The card IDs shown below (sv1-181, etc.) are for Nest Ball specifically.
+YOU MUST use the **Card IDs listed in the "Card Data" section above** for your implementation.
+These IDs come from standard_cards.json and are unique to each card printing.
 
 ```cpp
 /**
@@ -401,7 +442,7 @@ void register_nest_ball(LogicRegistry& registry) {
         return result;
     };
 
-    // Register for all printings
+    // IMPORTANT: These are Nest Ball's IDs - use YOUR card's IDs from the Card Data section!
     registry.register_trainer("sv1-181", handler);
     registry.register_generator("sv1-181", "trainer", generator);
     registry.register_trainer("sv1-255", handler);
@@ -678,6 +719,9 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
         subtype_folder = 'items' if 'Item' in subtypes else 'supporters' if 'Supporter' in subtypes else 'stadiums'
 
         prompt += f"""## Implementation Template
+
+**Note:** The card IDs below (`{', '.join(all_card_ids)}`) are from standard_cards.json for THIS card.
+Use these exact IDs in your registration - do NOT copy IDs from the Nest Ball example above!
 
 ### File: `cpp_engine/src/cards/trainers/{subtype_folder}/{card_snake}.cpp`
 

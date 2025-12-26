@@ -84,6 +84,49 @@ struct CompletionCallback {
 };
 
 // ============================================================================
+// FILTER PREDICATE
+// ============================================================================
+
+// Forward declare CardDef
+struct CardDef;
+
+/**
+ * FilterPredicate - Custom filter function for card matching.
+ *
+ * This allows cards to define their own complex filter logic without
+ * polluting the engine with card-specific string keys.
+ *
+ * Example (Super Rod):
+ *   filter_predicate = [](const CardDef& def) {
+ *       return def.is_pokemon() || (def.is_energy() && def.is_basic_energy);
+ *   };
+ */
+using FilterPredicateFn = std::function<bool(const CardDef&)>;
+
+/**
+ * Wrapper to make filter predicates copyable.
+ */
+struct FilterPredicate {
+    std::shared_ptr<FilterPredicateFn> predicate;
+
+    FilterPredicate() = default;
+
+    explicit FilterPredicate(FilterPredicateFn fn)
+        : predicate(std::make_shared<FilterPredicateFn>(std::move(fn))) {}
+
+    bool has_value() const { return predicate && *predicate; }
+
+    bool matches(const CardDef& def) const {
+        if (has_value()) {
+            return (*predicate)(def);
+        }
+        return true;  // No predicate = match all
+    }
+
+    explicit operator bool() const { return has_value(); }
+};
+
+// ============================================================================
 // RESOLUTION STEP TYPES
 // ============================================================================
 
@@ -109,8 +152,9 @@ struct SelectFromZoneStep {
     int min_count = 0;
     bool exact_count = false;
 
-    // Filtering
+    // Filtering - string-based (simple patterns) OR predicate-based (complex logic)
     std::unordered_map<std::string, std::string> filter_criteria;
+    FilterPredicate filter_predicate;  // Takes precedence if set
     std::vector<CardID> exclude_card_ids;
 
     // State tracking
@@ -141,8 +185,9 @@ struct SearchDeckStep {
     int min_count = 0;
     ZoneType destination = ZoneType::HAND;
 
-    // Filtering
+    // Filtering - string-based (simple patterns) OR predicate-based (complex logic)
     std::unordered_map<std::string, std::string> filter_criteria;
+    FilterPredicate filter_predicate;  // Takes precedence if set
 
     // State tracking
     std::vector<CardID> selected_card_ids;
