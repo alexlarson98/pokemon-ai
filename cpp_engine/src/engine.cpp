@@ -414,6 +414,31 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
                 continue;  // Cannot play supporter on turn 1 going first
             }
 
+            // Check card-specific playability via generator
+            if (logic_registry_.has_trainer_handler(card.card_id)) {
+                auto gen_result = logic_registry_.invoke_generator(card.card_id, "trainer", state, card);
+                if (!gen_result.valid) {
+                    continue;  // Card cannot be played
+                }
+                // Check generator mode to determine action handling
+                if (gen_result.mode == GeneratorMode::ACTION_GENERATION && !gen_result.actions.empty()) {
+                    // TARGETED pattern: generator provides complete actions with targets
+                    for (const auto& gen_action : gen_result.actions) {
+                        // Dedup by (functional_id + target_id + params)
+                        std::string action_key = fid;
+                        if (gen_action.target_id.has_value()) {
+                            action_key += ":" + *gen_action.target_id;
+                        }
+                        if (seen_supporters.find(action_key) == seen_supporters.end()) {
+                            seen_supporters.insert(action_key);
+                            actions.push_back(gen_action);
+                        }
+                    }
+                    continue;  // Don't add default action
+                }
+                // VALIDITY_CHECK: fall through to add default action
+            }
+
             if (seen_supporters.find(fid) == seen_supporters.end()) {
                 seen_supporters.insert(fid);
                 actions.push_back(Action::play_supporter(player.player_id, card.id));

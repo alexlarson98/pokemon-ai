@@ -62,6 +62,7 @@ add_library(pokemon_engine_core STATIC
     src/cards/trainers/items/night_stretcher.cpp
     src/cards/trainers/supporters/iono.cpp
     src/cards/trainers/supporters/dawn.cpp
+    src/cards/trainers/supporters/boss_orders.cpp
 )
 
 target_include_directories(pokemon_engine_core

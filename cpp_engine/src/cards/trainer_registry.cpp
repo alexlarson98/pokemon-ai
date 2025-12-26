@@ -63,12 +63,13 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"me2-87", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
     {"me2-118", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
     {"me2-129", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
+    {"me1-114", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
+    {"sv1-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
+    {"sv4-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
 
     // Supporters - Not Yet Implemented
     {"sv1-189", "Professor's Research", "supporter", "Discard hand, draw 7", false},
     {"sv3-181", "Professor's Research", "supporter", "Discard hand, draw 7", false},
-    {"sv1-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", false},
-    {"sv4-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", false},
     {"sv1-176", "Judge", "supporter", "Both shuffle hand, draw 4", false},
 
     // Stadiums - Not Yet Implemented
@@ -95,6 +96,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_super_rod(registry);
     register_iono(registry);
     register_dawn(registry);
+    register_boss_orders(registry);
     register_rare_candy(registry);
     register_night_stretcher(registry);
     // register_switch(registry);
@@ -219,9 +221,7 @@ void register_professors_research(LogicRegistry& registry) {
     // TODO: Implement in professors_research.cpp
 }
 
-void register_boss_orders(LogicRegistry& registry) {
-    // TODO: Implement in boss_orders.cpp
-}
+// register_boss_orders is implemented in boss_orders.cpp
 
 void register_judge(LogicRegistry& registry) {
     // TODO: Implement in judge.cpp
