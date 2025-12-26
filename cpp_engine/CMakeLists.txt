@@ -49,6 +49,7 @@ add_library(pokemon_engine_core STATIC
     src/engine.cpp
     src/card_database.cpp
     src/logic_registry.cpp
+    src/xray_logger.cpp
     # Card effects
     src/cards/effect_builders.cpp
     src/cards/trainer_registry.cpp

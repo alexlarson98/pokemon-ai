@@ -16,11 +16,13 @@
 #include <unordered_set>
 #include <random>
 #include <chrono>
+#include <memory>
 
 #include <nlohmann/json.hpp>
 #include "pokemon_engine.hpp"
 #include "cards/trainer_registry.hpp"
 #include "cards/effect_builders.hpp"
+#include "xray_logger.hpp"
 
 using namespace pokemon;
 using namespace pokemon::trainers;
@@ -684,6 +686,9 @@ public:
     // RNG
     std::mt19937 rng;
 
+    // X-Ray logger for debugging
+    std::unique_ptr<XRayLogger> xray_logger;
+
     // Setup state
     SetupPhase setup_phase = SetupPhase::COIN_FLIP;
     bool p0_assigned_heads = false;  // Which player is assigned heads
@@ -717,6 +722,11 @@ public:
         } else {
             std::cout << "Engine card database loaded: " << engine.get_card_database().card_count() << " cards" << std::endl;
         }
+
+        // Initialize X-Ray logger with card database for name resolution
+        // Use absolute path so logs go to the right place regardless of working directory
+        std::string xray_dir = "c:/Users/alexl/Desktop/Projects/pokemon-ai/cpp_engine/xrays";
+        xray_logger = std::make_unique<XRayLogger>(&engine.get_card_database(), xray_dir);
     }
 
     bool flip_coin() {
@@ -1005,6 +1015,11 @@ public:
 
         std::cout << "\n========== SETUP COMPLETE ==========\n" << std::endl;
 
+        // Log initial state to X-Ray
+        if (xray_logger) {
+            xray_logger->log_state(state);
+        }
+
         // Show game state and legal actions
         show_game_state_and_actions();
     }
@@ -1053,7 +1068,17 @@ public:
             }
             std::cout << std::endl;
 
+            // Log action to X-Ray before executing
+            if (xray_logger) {
+                xray_logger->log_action(state.turn_count, state.active_player_index, action);
+            }
+
             state = engine.step(state, action);
+
+            // Log resulting state to X-Ray after executing
+            if (xray_logger) {
+                xray_logger->log_state(state);
+            }
         }
 
         // Show updated state and actions
