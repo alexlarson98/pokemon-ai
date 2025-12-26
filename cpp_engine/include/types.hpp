@@ -46,7 +46,9 @@ enum class Subtype : uint8_t {
     SUPPORTER,
     STADIUM,
     TOOL,
-    ACE_SPEC
+    ACE_SPEC,
+    // Energy subtypes
+    SPECIAL  // Special Energy (not basic)
 };
 
 enum class EnergyType : uint8_t {

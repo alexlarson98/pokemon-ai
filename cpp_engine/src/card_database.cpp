@@ -489,7 +489,8 @@ Subtype CardDatabase::parse_subtype(const std::string& s) {
     if (s == "Tera") return Subtype::TERA;
     if (s == "Ancient") return Subtype::ANCIENT;
     if (s == "Future") return Subtype::FUTURE;
-    return Subtype::BASIC;  // Default
+    if (s == "Special") return Subtype::SPECIAL;
+    return Subtype::BASIC;
 }
 
 EnergyType CardDatabase::parse_energy_type(const std::string& s) {
