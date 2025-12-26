@@ -182,41 +182,219 @@ def get_trainer_architecture_section() -> str:
 - `cpp_engine/src/cards/trainers/supporters/{name}.cpp` - Supporter implementations
 - `cpp_engine/src/cards/trainer_registry.cpp` - Registration calls
 - `cpp_engine/include/cards/effect_builders.hpp` - Effect primitives
-- `cpp_engine/docs/CARD_INTEGRATION.md` - Full documentation
+- `cpp_engine/TRAINER_PATTERNS.md` - Full pattern documentation
 
-### Trainer Execution Lifecycle
-Understanding the full flow is critical for correct implementation:
+---
 
-1. **Legal Action Generation** (`get_trainer_actions()`)
-   - Engine finds Item/Supporter cards in hand
-   - Calls `generator` callback to check if card can be played
-   - If `generator.valid == true`, adds PLAY_TRAINER action to legal actions
+## CRITICAL: Three Trainer Patterns
 
-2. **Effect Execution** (`process_action()` -> `execute_trainer()`)
-   - Player selects PLAY_TRAINER action
-   - Engine calls `handler` callback
-   - Handler returns `TrainerResult` with success/requires_resolution flags
+ALL trainer cards fit exactly one of these three patterns. Determine which pattern applies
+BEFORE writing any code. This architecture is final - do not deviate from it.
 
-3. **Resolution Stack** (if `requires_resolution == true`)
-   - Effect builders push `SearchDeckStep`, `SelectFromZoneStep`, etc. onto stack
-   - Engine enters resolution mode, generates selection actions
-   - Player makes selections -> step completes -> callback fires
-   - Stack empties -> back to normal play
+| Pattern | Generator Mode | Resolution Stack | Example Cards |
+|---------|---------------|------------------|---------------|
+| **IMMEDIATE** | `VALIDITY_CHECK` | No | Iono, Professor's Research |
+| **TARGETED** | `ACTION_GENERATION` | No | Rare Candy, Switch |
+| **SEARCH** | `VALIDITY_CHECK` | Yes | Nest Ball, Ultra Ball |
 
-4. **Trainer Card Discarded** (automatic)
-   - After handler returns, engine moves trainer to discard pile
-   - You do NOT need to handle this - the engine does it
+### Decision Framework
+```
+Does the card require player choices?
+├─ No → IMMEDIATE
+└─ Yes → Are targets visible (board, hand)?
+         ├─ Yes → TARGETED
+         └─ No (deck, prizes) → SEARCH
+```
 
-### Effect Builders Available
+---
+
+## Pattern 1: IMMEDIATE
+
+**Use when:** The effect is deterministic with no player choices.
+
+**Characteristics:**
+- No targeting required
+- No hidden information revealed
+- Effect executes immediately in handler
+- Generator only validates playability (mode = VALIDITY_CHECK, the default)
+
+**Examples:** Iono, Professor's Research, Judge
+
+```cpp
+// Generator: VALIDITY_CHECK mode (default)
+auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    GeneratorResult result;
+    result.valid = true;  // Iono can always be played
+    // mode defaults to VALIDITY_CHECK
+    return result;
+};
+
+// Handler: Direct effect using TrainerContext
+auto handler = [](TrainerContext& ctx) -> TrainerResult {
+    TrainerResult result;
+    auto& state = ctx.state;
+    // Execute effect directly on state
+    // No resolution steps needed
+    result.success = true;
+    return result;
+};
+```
+
+---
+
+## Pattern 2: TARGETED
+
+**Use when:** Player must choose from visible targets (board, hand - NOT hidden zones).
+
+**Characteristics:**
+- Targets are visible to player (board, hand)
+- Generator enumerates all valid (card, target) combinations
+- Generator sets `mode = GeneratorMode::ACTION_GENERATION`
+- Each combination becomes a separate legal action
+- Handler receives target info via `ctx.action.target_id` and `ctx.action.parameters`
+- No resolution stack needed
+
+**Examples:** Rare Candy, Switch, Boss's Orders
+
+```cpp
+// Generator: ACTION_GENERATION mode - provides complete actions with targets
+auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    GeneratorResult result;
+
+    auto pairs = get_valid_pairs(state, db, player_id);
+    if (pairs.empty()) {
+        result.valid = false;
+        result.reason = "No valid targets";
+        return result;
+    }
+
+    result.valid = true;
+    result.mode = GeneratorMode::ACTION_GENERATION;  // CRITICAL!
+
+    for (const auto& pair : pairs) {
+        Action action = Action::play_item(player_id, card.id);
+        action.target_id = pair.basic_id;
+        action.parameters["stage2_id"] = pair.stage2_id;
+        result.actions.push_back(action);
+    }
+
+    return result;
+};
+
+// Handler: Use targets from ctx.action
+auto handler = [](TrainerContext& ctx) -> TrainerResult {
+    TrainerResult result;
+    const CardID& target = *ctx.action.target_id;
+    const CardID& stage2 = ctx.action.parameters.at("stage2_id");
+    // Execute effect with specific targets
+    result.success = true;
+    return result;
+};
+```
+
+---
+
+## Pattern 3: SEARCH
+
+**Use when:** Player must select from hidden zones (deck, prizes).
+
+**Characteristics:**
+- Selection from hidden zone (deck search, etc.)
+- Generator only validates playability (mode = VALIDITY_CHECK, the default)
+- Handler pushes resolution steps to stack
+- Engine handles step-by-step selection UI
+- Handler sets `result.requires_resolution = true`
+
+**Examples:** Nest Ball, Ultra Ball, Super Rod, Buddy-Buddy Poffin
+
+```cpp
+// Generator: VALIDITY_CHECK mode (default)
+auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    GeneratorResult result;
+    result.valid = has_bench_space(state, player_id);
+    // mode defaults to VALIDITY_CHECK
+    return result;
+};
+
+// Handler: Push resolution steps using TrainerContext
+auto handler = [](TrainerContext& ctx) -> TrainerResult {
+    TrainerResult result;
+    auto& state = ctx.state;
+
+    auto effect_result = effects::search_deck_to_bench(
+        state, ctx.card, player_id, filter,
+        1,    // count
+        0     // min_count (can fail to find)
+    );
+
+    result.success = effect_result.success;
+    result.requires_resolution = effect_result.requires_resolution;
+    return result;
+};
+```
+
+---
+
+## TrainerContext (Unified Handler Signature)
+
+ALL trainers use `TrainerHandler` which receives `TrainerContext&`:
+
+```cpp
+struct TrainerContext {
+    GameState& state;           // Mutable game state
+    const CardInstance& card;   // The trainer card being played
+    const CardDatabase& db;     // Card definitions for lookups
+    const Action& action;       // Contains target_id/parameters for TARGETED cards
+};
+
+using TrainerHandler = std::function<TrainerResult(TrainerContext&)>;
+```
+
+---
+
+## Registration (Unified Pattern)
+
+ALL trainers register with `register_trainer_handler()` and `register_generator()`:
+
+```cpp
+void register_{card_name}(LogicRegistry& registry) {
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_{card_name}(ctx);
+    };
+
+    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+        GeneratorResult result;
+        result.valid = can_play_{card_name}(state, state.active_player_index);
+        if (!result.valid) {
+            result.reason = "Cannot play";
+        }
+        // For TARGETED pattern only: result.mode = GeneratorMode::ACTION_GENERATION;
+        return result;
+    };
+
+    // Register for all printings
+    const std::vector<std::string> card_ids = {"sv1-xxx", "sv2-yyy"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
+}
+```
+
+---
+
+## Effect Builders Available
+
 ```cpp
 namespace effects {
     // Search deck for cards
     EffectResult search_deck(state, source_card, player_id, filter,
-        count=1, min_count=0, destination=HAND, shuffle_after=true, on_complete=nullptr);
+        count=1, min_count=0, destination=HAND, shuffle_after=true);
 
     // Search deck directly to bench (for Nest Ball, Poffin)
     EffectResult search_deck_to_bench(state, source_card, player_id, filter,
-        count=1, min_count=0, on_complete=nullptr);
+        count=1, min_count=0);
 
     // Discard cards then do something (Ultra Ball)
     EffectResult discard_then(state, source_card, player_id, discard_count, filter, then_effect);
@@ -227,149 +405,64 @@ namespace effects {
     // Discard hand and draw (Professor's Research)
     EffectResult discard_hand_draw(state, player_id, draw_count);
 
-    // Recover from discard to hand
-    EffectResult recover_from_discard(state, source_card, player_id, filter, count, min_count=0);
-
-    // Shuffle discard into deck - TWO VERSIONS:
-    // 1. String-based filter (simple patterns)
-    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter, count, min_count=0);
-    // 2. Predicate-based filter (complex OR logic) - PREFERRED for compound filters
-    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter_fn, count, min_count=0);
+    // Shuffle discard into deck (predicate filter for complex OR logic)
+    EffectResult shuffle_discard_to_deck(state, source_card, player_id, filter_fn, count, min_count);
 
     // Switch active Pokemon
-    EffectResult switch_active(state, source_card, player_id, opponent_also=false);
-
-    // Heal damage
-    EffectResult heal_damage(state, source_card, player_id, target_id, amount);
+    EffectResult switch_active(state, source_card, player_id);
 
     // Validation helpers
     bool has_bench_space(state, player_id);
-    bool can_discard_from_hand(state, player_id, count, filter={});
-    int count_matching_cards(state, db, player_id, zone, filter);
 }
 ```
 
-### Filter Builder (Simple Patterns)
-For simple AND filters, use FilterBuilder:
+### Filter Builder
 ```cpp
 auto filter = effects::FilterBuilder()
-    .supertype("Pokemon")      // "Pokemon", "Trainer", "Energy"
-    .subtype("Basic")          // "Basic", "Stage 1", "Stage 2", "Item", etc.
-    .pokemon_type(EnergyType::FIGHTING)  // For type-specific searches
-    .max_hp(70)                // For Buddy-Buddy Poffin
-    .name("Pikachu")           // Specific card search
-    .evolves_from("Charmander") // Evolution search
-    .is_basic_energy()         // Basic Energy cards only
-    .is_supporter()            // Supporter trainers (for Pal Pad)
-    .pokemon_or_basic_energy() // Pokemon OR basic Energy (Super Rod shortcut)
+    .supertype("Pokemon")
+    .subtype("Basic")
+    .max_hp(70)
     .build();
 ```
 
-### Predicate Filters (Complex Patterns - PREFERRED)
-For complex filter logic (especially OR conditions), use lambda predicates:
+### Predicate Filters (for complex OR logic)
 ```cpp
-#include "card_database.hpp"  // For CardDef
-
-// Example: Super Rod - Pokemon OR basic Energy
 auto effect_result = effects::shuffle_discard_to_deck(
-    state, card, player_id,
+    state, ctx.card, player_id,
     [](const CardDef& def) {
         return def.is_pokemon() || (def.is_energy() && def.is_basic_energy);
     },
-    3,  // count
-    0   // min_count
+    3, 1  // count, min_count
 );
-
-// Example: Night Stretcher - Pokemon only (could also use FilterBuilder)
-auto effect_result = effects::shuffle_discard_to_deck(
-    state, card, player_id,
-    [](const CardDef& def) { return def.is_pokemon(); },
-    1, 0
-);
-```
-
-**When to use predicates vs FilterBuilder:**
-- **FilterBuilder**: Simple AND patterns (Basic Pokemon, Pokemon with ≤70 HP, etc.)
-- **Predicate**: Complex OR patterns, compound conditions, or any logic that FilterBuilder can't express
-
-The predicate approach keeps filter logic with the card implementation rather than adding
-card-specific keys to the engine, making the codebase more maintainable.
-
-### Callbacks vs Default Behavior
-**Use default behavior (no callback)** when:
-- `search_deck_to_bench`: Selected cards go to bench, deck shuffles (default)
-- `search_deck` with `destination=HAND`: Cards go to hand, deck shuffles (default)
-
-**Provide a callback** when:
-- Selected cards need special handling (attach to Pokemon, evolve, etc.)
-- Additional steps must be pushed after selection
-- Side effects occur (damage counters, status conditions, etc.)
-
-### Search Semantics: Hidden vs Public Zones
-
-**Deck (hidden zone)** - "Fail to find" is ALWAYS allowed:
-- `min_count=0` lets player choose 0 cards even if valid targets exist
-- This is intentional - opponent can't verify deck contents
-- Player may strategically choose not to find anything
-
-**Discard pile / Hand (public zones)** - NO fail to find:
-- Both players can see these zones
-- If valid targets exist, player MUST select them
-- Use `min_count` equal to available targets or required count
-- Generator should check `count_matching_cards()` for playability
-
-Example - Energy Retrieval (recover 2 basic energy from discard):
-```cpp
-// Generator must verify discard has basic energy
-auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
-    GeneratorResult result;
-    auto filter = effects::FilterBuilder().is_basic_energy().build();
-    int available = effects::count_matching_cards(state, db, player_id, ZoneType::DISCARD, filter);
-    result.valid = available > 0;  // Must have at least 1 target
-    return result;
-};
-```
-
-### Registration Pattern
-Cards register:
-1. **TrainerCallback** - Execute the effect
-2. **GeneratorCallback** - Check if card can be played (for legal actions)
-
-```cpp
-void register_{card_name}(LogicRegistry& registry) {
-    // Handler - executes the effect
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        // Implementation
-    };
-
-    // Generator - checks playability (CRITICAL: prevents invalid actions)
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
-        GeneratorResult result;
-        result.valid = /* can play? */;
-        result.reason = "Reason if invalid";
-        return result;
-    };
-
-    registry.register_trainer("{card_id}", handler);
-    registry.register_generator("{card_id}", "trainer", generator);
-}
 ```
 
 ---
 
-## Reference Implementation: Nest Ball
+## Search Semantics: Hidden vs Public Zones
 
-This is a complete working example. Use it as your template.
+**Deck (hidden zone)** - "Fail to find" is ALWAYS allowed:
+- `min_count=0` lets player choose 0 cards even if valid targets exist
+
+**Discard pile / Hand (public zones)** - NO fail to find:
+- If valid targets exist, player MUST select them
+- Use `min_count >= 1` for public zones
+
+---
+
+## Reference Implementation: Nest Ball (SEARCH Pattern)
 
 **CRITICAL: Card IDs must match your card!**
-The card IDs shown below (sv1-181, etc.) are for Nest Ball specifically.
-YOU MUST use the **Card IDs listed in the "Card Data" section above** for your implementation.
-These IDs come from standard_cards.json and are unique to each card printing.
+Use the Card IDs from the Card Data section, NOT these example IDs.
 
 ```cpp
 /**
- * Nest Ball - Trainer Item
- * "Search your deck for a Basic Pokemon and put it onto your Bench. Then, shuffle your deck."
+ * Nest Ball - Trainer Item (SEARCH Pattern)
+ *
+ * Card text:
+ * "Search your deck for a Basic Pokemon and put it onto your Bench.
+ *  Then, shuffle your deck."
+ *
+ * Card IDs: sv1-181, sv1-255, sv4pt5-84
  */
 
 #include "cards/trainer_registry.hpp"
@@ -380,23 +473,13 @@ namespace trainers {
 
 namespace {
 
-/**
- * Check if Nest Ball can be played.
- * Requirements:
- * - Player must have bench space
- * - (Note: Deck having Basic Pokemon is NOT required - can "fail to find")
- */
 bool can_play_nest_ball(const GameState& state, PlayerID player_id) {
     return effects::has_bench_space(state, player_id);
 }
 
-/**
- * Execute Nest Ball effect.
- * Creates a SearchDeckStep with filter for Basic Pokemon.
- * The selected card goes directly to bench.
- */
-TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
+TrainerResult execute_nest_ball(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     if (!can_play_nest_ball(state, player_id)) {
@@ -405,16 +488,13 @@ TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
         return result;
     }
 
-    // Build filter: Basic Pokemon only
     auto filter = effects::FilterBuilder()
         .supertype("Pokemon")
         .subtype("Basic")
         .build();
 
-    // Search deck, put on bench
-    // min_count = 0 because search can fail to find
     auto effect_result = effects::search_deck_to_bench(
-        state, card, player_id, filter,
+        state, ctx.card, player_id, filter,
         1,      // count: select up to 1
         0       // min_count: can choose to find nothing
     );
@@ -429,26 +509,27 @@ TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
 } // anonymous namespace
 
 void register_nest_ball(LogicRegistry& registry) {
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_nest_ball(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_nest_ball(ctx);
     };
 
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    auto generator = [](const GameState& state, const CardInstance& /*card*/) -> GeneratorResult {
         GeneratorResult result;
         result.valid = can_play_nest_ball(state, state.active_player_index);
         if (!result.valid) {
             result.reason = "No bench space";
         }
+        // SEARCH pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    // IMPORTANT: These are Nest Ball's IDs - use YOUR card's IDs from the Card Data section!
-    registry.register_trainer("sv1-181", handler);
-    registry.register_generator("sv1-181", "trainer", generator);
-    registry.register_trainer("sv1-255", handler);
-    registry.register_generator("sv1-255", "trainer", generator);
-    registry.register_trainer("sv4pt5-84", handler);
-    registry.register_generator("sv4pt5-84", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {"sv1-181", "sv1-255", "sv4pt5-84"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers
@@ -718,24 +799,44 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
     if supertype == 'Trainer':
         subtype_folder = 'items' if 'Item' in subtypes else 'supporters' if 'Supporter' in subtypes else 'stadiums'
 
+        # Detect pattern for this card
+        rules = first_card.get('rules', [])
+        full_text = ' '.join(rules).lower()
+
+        # Determine pattern
+        if 'search' in full_text and ('deck' in full_text or 'discard' in full_text):
+            pattern = 'SEARCH'
+            pattern_comment = 'SEARCH pattern: Uses resolution stack for hidden zone selection'
+        elif any(word in full_text for word in ['switch', 'evolve', 'attach', 'move']):
+            pattern = 'TARGETED'
+            pattern_comment = 'TARGETED pattern: Generator provides actions with visible targets'
+        else:
+            pattern = 'IMMEDIATE'
+            pattern_comment = 'IMMEDIATE pattern: Effect executes directly, no player choices'
+
         prompt += f"""## Implementation Template
 
-**Note:** The card IDs below (`{', '.join(all_card_ids)}`) are from standard_cards.json for THIS card.
-Use these exact IDs in your registration - do NOT copy IDs from the Nest Ball example above!
+**Pattern:** {pattern}
+{pattern_comment}
+
+**Card IDs:** `{', '.join(all_card_ids)}`
 
 ### File: `cpp_engine/src/cards/trainers/{subtype_folder}/{card_snake}.cpp`
 
 ```cpp
 /**
- * {card_name} - Trainer {'Item' if 'Item' in subtypes else 'Supporter' if 'Supporter' in subtypes else 'Stadium'}
+ * {card_name} - Trainer {'Item' if 'Item' in subtypes else 'Supporter' if 'Supporter' in subtypes else 'Stadium'} ({pattern} Pattern)
  *
  * Card text:
 """
-        rules = first_card.get('rules', [])
         for rule in rules:
             prompt += f' * "{rule}"\n'
         prompt += f""" *
  * Card IDs: {', '.join(all_card_ids)}
+ *
+ * Pattern: {pattern}
+ * - {"Generator mode: VALIDITY_CHECK (default)" if pattern != 'TARGETED' else "Generator mode: ACTION_GENERATION"}
+ * - {"Uses resolution stack: Yes" if pattern == 'SEARCH' else "Uses resolution stack: No"}
  */
 
 #include "cards/trainer_registry.hpp"
@@ -756,10 +857,11 @@ bool can_play_{card_snake}(const GameState& state, PlayerID player_id) {{
 }}
 
 /**
- * Execute {card_name} effect.
+ * Execute {card_name} effect using TrainerContext.
  */
-TrainerResult execute_{card_snake}(GameState& state, const CardInstance& card) {{
+TrainerResult execute_{card_snake}(TrainerContext& ctx) {{
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     if (!can_play_{card_snake}(state, player_id)) {{
@@ -767,48 +869,100 @@ TrainerResult execute_{card_snake}(GameState& state, const CardInstance& card) {
         result.effect_description = "Cannot play {card_name}";
         return result;
     }}
+"""
+        if pattern == 'TARGETED':
+            prompt += f"""
+    // TARGETED pattern: Get target info from ctx.action
+    if (!ctx.action.target_id.has_value()) {{
+        result.success = false;
+        result.effect_description = "No target specified";
+        return result;
+    }}
+    const CardID& target = *ctx.action.target_id;
+    // const auto& param = ctx.action.parameters.at("param_name");
 
-    // TODO: Build filter criteria
+    // TODO: Execute effect with specific targets
+"""
+        elif pattern == 'SEARCH':
+            prompt += f"""
+    // SEARCH pattern: Build filter and use effect builder
     auto filter = effects::FilterBuilder()
         // .supertype("Pokemon")
         // .subtype("Basic")
-        // .max_hp(70)
         .build();
 
     // TODO: Use appropriate effect builder
-    // auto effect_result = effects::search_deck_to_bench(
-    //     state, card, player_id, filter, count, min_count);
+    auto effect_result = effects::search_deck_to_bench(
+        state, ctx.card, player_id, filter,
+        1,      // count
+        0       // min_count (can fail to find in hidden zones)
+    );
 
-    // result.success = effect_result.success;
-    // result.requires_resolution = effect_result.requires_resolution;
+    result.success = effect_result.success;
+    result.requires_resolution = effect_result.requires_resolution;
+"""
+        else:  # IMMEDIATE
+            prompt += f"""
+    // IMMEDIATE pattern: Execute effect directly
+    // TODO: Implement the immediate effect
+    // Example: draw cards, shuffle hands, etc.
+"""
+
+        prompt += f"""
+    result.success = true;
     result.effect_description = "{card_name} effect";
-
     return result;
 }}
 
 }} // anonymous namespace
 
 void register_{card_snake}(LogicRegistry& registry) {{
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {{
-        return execute_{card_snake}(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {{
+        return execute_{card_snake}(ctx);
     }};
 
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {{
+    auto generator = [](const GameState& state, const CardInstance& {"card" if pattern == 'TARGETED' else "/*card*/"}) -> GeneratorResult {{
         GeneratorResult result;
-        result.valid = can_play_{card_snake}(state, state.active_player_index);
+"""
+        if pattern == 'TARGETED':
+            prompt += f"""
+        // TARGETED pattern: Generate actions with target info
+        // TODO: Find all valid targets
+        // auto targets = find_valid_targets(state, player_id);
+        // if (targets.empty()) {{
+        //     result.valid = false;
+        //     result.reason = "No valid targets";
+        //     return result;
+        // }}
+
+        result.valid = true;
+        result.mode = GeneratorMode::ACTION_GENERATION;  // CRITICAL for TARGETED!
+
+        // TODO: Create an action for each valid target
+        // for (const auto& target : targets) {{
+        //     Action action = Action::play_item(state.active_player_index, card.id);
+        //     action.target_id = target.id;
+        //     result.actions.push_back(action);
+        // }}
+"""
+        else:
+            prompt += f"""        result.valid = can_play_{card_snake}(state, state.active_player_index);
         if (!result.valid) {{
             result.reason = "Cannot play {card_name}";
         }}
-        return result;
+        // {pattern} pattern: VALIDITY_CHECK mode (default)
+"""
+        prompt += f"""        return result;
     }};
 
-    // Register for all printings
-"""
-        for card_id in all_card_ids:
-            prompt += f'    registry.register_trainer("{card_id}", handler);\n'
-            prompt += f'    registry.register_generator("{card_id}", "trainer", generator);\n'
-
-        prompt += f"""}}
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {{{', '.join(f'"{id}"' for id in all_card_ids)}}};
+    for (const auto& id : card_ids) {{
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }}
+}}
 
 }} // namespace trainers
 }} // namespace pokemon

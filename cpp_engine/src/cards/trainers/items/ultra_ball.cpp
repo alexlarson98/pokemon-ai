@@ -33,14 +33,15 @@ bool can_play_ultra_ball(const GameState& state, PlayerID player_id) {
 }
 
 /**
- * Execute Ultra Ball effect.
+ * Execute Ultra Ball effect using TrainerContext.
  *
  * Two-step resolution:
  * 1. Discard 2 cards from hand
  * 2. Search deck for any Pokemon, add to hand
  */
-TrainerResult execute_ultra_ball(GameState& state, const CardInstance& card) {
+TrainerResult execute_ultra_ball(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     if (!can_play_ultra_ball(state, player_id)) {
@@ -59,7 +60,7 @@ TrainerResult execute_ultra_ball(GameState& state, const CardInstance& card) {
     // 2. Then, search deck for a Pokemon
     auto effect_result = effects::discard_then(
         state,
-        card,
+        ctx.card,
         player_id,
         2,      // discard_count: must discard exactly 2 cards
         {},     // discard_filter: any cards can be discarded
@@ -96,26 +97,27 @@ TrainerResult execute_ultra_ball(GameState& state, const CardInstance& card) {
 } // anonymous namespace
 
 void register_ultra_ball(LogicRegistry& registry) {
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_ultra_ball(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_ultra_ball(ctx);
     };
 
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    auto generator = [](const GameState& state, const CardInstance& /*card*/) -> GeneratorResult {
         GeneratorResult result;
         result.valid = can_play_ultra_ball(state, state.active_player_index);
         if (!result.valid) {
             result.reason = "Need 2 other cards to discard";
         }
+        // SEARCH pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    // Register for all printings
-    registry.register_trainer("sv1-196", handler);
-    registry.register_generator("sv1-196", "trainer", generator);
-    registry.register_trainer("sv4pt5-91", handler);
-    registry.register_generator("sv4pt5-91", "trainer", generator);
-    registry.register_trainer("me1-131", handler);
-    registry.register_generator("me1-131", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {"sv1-196", "sv4pt5-91", "me1-131"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers

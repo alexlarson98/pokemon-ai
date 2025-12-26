@@ -37,15 +37,16 @@ bool can_play_iono(const GameState& /*state*/, PlayerID /*player_id*/) {
 }
 
 /**
- * Execute Iono effect.
+ * Execute Iono effect using TrainerContext.
  *
  * 1. Both players shuffle their hands and put them on bottom of deck
  * 2. If either player had cards, both draw cards equal to remaining prizes
  *
  * This is an immediate effect - no resolution stack needed.
  */
-TrainerResult execute_iono(GameState& state, const CardInstance& /*card*/) {
+TrainerResult execute_iono(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
 
     auto& player = state.get_active_player();
     auto& opponent = state.get_opponent();
@@ -114,8 +115,9 @@ TrainerResult execute_iono(GameState& state, const CardInstance& /*card*/) {
 } // anonymous namespace
 
 void register_iono(LogicRegistry& registry) {
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_iono(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_iono(ctx);
     };
 
     auto generator = [](const GameState& state, const CardInstance& /*card*/) -> GeneratorResult {
@@ -124,22 +126,18 @@ void register_iono(LogicRegistry& registry) {
         if (!result.valid) {
             result.reason = "Cannot play Iono";
         }
+        // IMMEDIATE pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    // Register for all printings
-    registry.register_trainer("svp-124", handler);
-    registry.register_generator("svp-124", "trainer", generator);
-    registry.register_trainer("sv2-185", handler);
-    registry.register_generator("sv2-185", "trainer", generator);
-    registry.register_trainer("sv2-254", handler);
-    registry.register_generator("sv2-254", "trainer", generator);
-    registry.register_trainer("sv2-269", handler);
-    registry.register_generator("sv2-269", "trainer", generator);
-    registry.register_trainer("sv4pt5-80", handler);
-    registry.register_generator("sv4pt5-80", "trainer", generator);
-    registry.register_trainer("sv4pt5-237", handler);
-    registry.register_generator("sv4pt5-237", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {
+        "svp-124", "sv2-185", "sv2-254", "sv2-269", "sv4pt5-80", "sv4pt5-237"
+    };
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers

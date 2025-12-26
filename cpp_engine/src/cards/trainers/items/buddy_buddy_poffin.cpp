@@ -28,13 +28,14 @@ bool can_play_buddy_buddy_poffin(const GameState& state, PlayerID player_id) {
 }
 
 /**
- * Execute Buddy-Buddy Poffin effect.
+ * Execute Buddy-Buddy Poffin effect using TrainerContext.
  *
  * Creates a SearchDeckStep with filter for Basic Pokemon with 70 HP or less.
  * Player can select up to 2 matching Pokemon to put directly on bench.
  */
-TrainerResult execute_buddy_buddy_poffin(GameState& state, const CardInstance& card) {
+TrainerResult execute_buddy_buddy_poffin(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     if (!can_play_buddy_buddy_poffin(state, player_id)) {
@@ -61,7 +62,7 @@ TrainerResult execute_buddy_buddy_poffin(GameState& state, const CardInstance& c
     // min_count = 0: can choose to find nothing (deck is hidden zone)
     auto effect_result = effects::search_deck_to_bench(
         state,
-        card,
+        ctx.card,
         player_id,
         filter,
         count,  // count: select up to min(2, available_space)
@@ -78,28 +79,27 @@ TrainerResult execute_buddy_buddy_poffin(GameState& state, const CardInstance& c
 } // anonymous namespace
 
 void register_buddy_buddy_poffin(LogicRegistry& registry) {
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_buddy_buddy_poffin(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_buddy_buddy_poffin(ctx);
     };
 
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    auto generator = [](const GameState& state, const CardInstance& /*card*/) -> GeneratorResult {
         GeneratorResult result;
         result.valid = can_play_buddy_buddy_poffin(state, state.active_player_index);
         if (!result.valid) {
             result.reason = "No bench space";
         }
+        // SEARCH pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    // Register for all printings
-    registry.register_trainer("sv5-144", handler);
-    registry.register_generator("sv5-144", "trainer", generator);
-    registry.register_trainer("sv6-223", handler);
-    registry.register_generator("sv6-223", "trainer", generator);
-    registry.register_trainer("sv8pt5-101", handler);
-    registry.register_generator("sv8pt5-101", "trainer", generator);
-    registry.register_trainer("me1-167", handler);
-    registry.register_generator("me1-167", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {"sv5-144", "sv6-223", "sv8pt5-101", "me1-167"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers

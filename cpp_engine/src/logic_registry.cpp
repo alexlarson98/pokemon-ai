@@ -27,14 +27,27 @@ void LogicRegistry::register_ability(const CardDefID& card_id,
     abilities_[key] = std::move(callback);
 }
 
-void LogicRegistry::register_trainer(const CardDefID& card_id,
-                                     TrainerCallback callback) {
-    trainers_[card_id] = std::move(callback);
+// ============================================================================
+// UNIFIED TRAINER REGISTRATION
+// ============================================================================
+
+void LogicRegistry::register_trainer_handler(const CardDefID& card_id,
+                                              TrainerHandler handler) {
+    trainer_handlers_[card_id] = std::move(handler);
 }
 
-void LogicRegistry::register_trainer_with_action(const CardDefID& card_id,
-                                                  TrainerWithActionCallback callback) {
-    trainers_with_action_[card_id] = std::move(callback);
+bool LogicRegistry::has_trainer_handler(const CardDefID& card_id) const {
+    return trainer_handlers_.find(card_id) != trainer_handlers_.end();
+}
+
+TrainerResult LogicRegistry::invoke_trainer_handler(const CardDefID& card_id,
+                                                     TrainerContext& ctx) const {
+    auto it = trainer_handlers_.find(card_id);
+    if (it != trainer_handlers_.end()) {
+        return it->second(ctx);
+    }
+    // Default: trainer has no special effect
+    return TrainerResult{};
 }
 
 void LogicRegistry::register_generator(const CardDefID& card_id,
@@ -91,14 +104,6 @@ bool LogicRegistry::has_ability(const CardDefID& card_id,
     return abilities_.find(key) != abilities_.end();
 }
 
-bool LogicRegistry::has_trainer(const CardDefID& card_id) const {
-    return trainers_.find(card_id) != trainers_.end();
-}
-
-bool LogicRegistry::has_trainer_with_action(const CardDefID& card_id) const {
-    return trainers_with_action_.find(card_id) != trainers_with_action_.end();
-}
-
 // ============================================================================
 // INVOCATION
 // ============================================================================
@@ -132,33 +137,6 @@ AbilityResult LogicRegistry::invoke_ability(const CardDefID& card_id,
 
     // Default: ability has no effect
     return AbilityResult{};
-}
-
-TrainerResult LogicRegistry::invoke_trainer(const CardDefID& card_id,
-                                            GameState& state,
-                                            const CardInstance& card) const {
-    auto it = trainers_.find(card_id);
-
-    if (it != trainers_.end()) {
-        return it->second(state, card);
-    }
-
-    // Default: trainer has no special effect
-    return TrainerResult{};
-}
-
-TrainerResult LogicRegistry::invoke_trainer_with_action(const CardDefID& card_id,
-                                                         GameState& state,
-                                                         const CardInstance& card,
-                                                         const Action& action) const {
-    auto it = trainers_with_action_.find(card_id);
-
-    if (it != trainers_with_action_.end()) {
-        return it->second(state, card, action);
-    }
-
-    // Default: trainer has no special effect
-    return TrainerResult{};
 }
 
 GeneratorResult LogicRegistry::invoke_generator(const CardDefID& card_id,
@@ -371,19 +349,12 @@ void LogicRegistry::register_python_attack(const CardDefID& card_id,
 
 void LogicRegistry::register_python_trainer(const CardDefID& card_id,
                                             std::function<void(void*)> py_callback) {
-    register_trainer(card_id,
-        [py_callback](GameState& state, const CardInstance& card) -> TrainerResult {
-            struct PythonContext {
-                GameState* state;
-                const CardInstance* card;
-                TrainerResult result;
-            };
-
-            PythonContext ctx{&state, &card, TrainerResult{}};
-            py_callback(&ctx);
-
-            return ctx.result;
-        });
+    // Note: Python trainer support requires a CardDatabase to create TrainerContext.
+    // This is a stub - Python trainers should be registered via a different mechanism
+    // that provides the necessary CardDatabase reference.
+    // TODO: Implement proper Python trainer registration with CardDatabase access
+    (void)card_id;
+    (void)py_callback;
 }
 
 // ============================================================================

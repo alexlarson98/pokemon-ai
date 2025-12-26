@@ -28,13 +28,14 @@ bool can_play_nest_ball(const GameState& state, PlayerID player_id) {
 }
 
 /**
- * Execute Nest Ball effect.
+ * Execute Nest Ball effect using TrainerContext.
  *
  * Creates a SearchDeckStep with filter for Basic Pokemon.
  * The selected card goes directly to bench.
  */
-TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
+TrainerResult execute_nest_ball(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     // Check precondition
@@ -54,7 +55,7 @@ TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
     // min_count = 0 because search can fail to find
     auto effect_result = effects::search_deck_to_bench(
         state,
-        card,
+        ctx.card,
         player_id,
         filter,
         1,      // count: select up to 1
@@ -71,37 +72,27 @@ TrainerResult execute_nest_ball(GameState& state, const CardInstance& card) {
 } // anonymous namespace
 
 void register_nest_ball(LogicRegistry& registry) {
-    // Register handler for all Nest Ball printings
-    // The card name is the same, so use a single handler
-
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_nest_ball(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_nest_ball(ctx);
     };
 
-    // Register for known Nest Ball card IDs
-    registry.register_trainer("sv1-181", handler);
-    registry.register_trainer("sv1-255", handler);
-    registry.register_trainer("sv4pt5-84", handler);
-
-    // Also register a generator to check if Nest Ball can be played
-    auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
+    auto generator = [](const GameState& state, const CardInstance& /*card*/) -> GeneratorResult {
         GeneratorResult result;
-
-        // Check if we can play Nest Ball
-        if (can_play_nest_ball(state, state.active_player_index)) {
-            // Generate action for this card
-            result.valid = true;
-        } else {
-            result.valid = false;
+        result.valid = can_play_nest_ball(state, state.active_player_index);
+        if (!result.valid) {
             result.reason = "No bench space";
         }
-
+        // SEARCH pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    registry.register_generator("sv1-181", "trainer", generator);
-    registry.register_generator("sv1-255", "trainer", generator);
-    registry.register_generator("sv4pt5-84", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {"sv1-181", "sv1-255", "sv4pt5-84"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers

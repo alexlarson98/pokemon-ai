@@ -302,7 +302,7 @@ PYBIND11_MODULE(pokemon_engine_cpp, m) {
         .def(py::init<>())
         .def("has_attack", &pokemon::LogicRegistry::has_attack)
         .def("has_ability", &pokemon::LogicRegistry::has_ability)
-        .def("has_trainer", &pokemon::LogicRegistry::has_trainer)
+        .def("has_trainer", &pokemon::LogicRegistry::has_trainer_handler)
         .def("attack_count", &pokemon::LogicRegistry::attack_count)
         .def("ability_count", &pokemon::LogicRegistry::ability_count)
         .def("trainer_count", &pokemon::LogicRegistry::trainer_count)
@@ -354,24 +354,14 @@ PYBIND11_MODULE(pokemon_engine_cpp, m) {
                     }
                 });
         })
-        .def("register_trainer", [](pokemon::LogicRegistry& self,
-                                    const std::string& card_id,
-                                    py::function callback) {
-            self.register_trainer(card_id,
-                [callback](pokemon::GameState& state,
-                           const pokemon::CardInstance& card) -> pokemon::TrainerResult {
-                    try {
-                        py::object result = callback(py::cast(&state, py::return_value_policy::reference),
-                                                     py::cast(card));
-                        if (py::isinstance<pokemon::TrainerResult>(result)) {
-                            return result.cast<pokemon::TrainerResult>();
-                        }
-                        return pokemon::TrainerResult{};
-                    } catch (const std::exception& e) {
-                        std::cerr << "[LogicRegistry] Trainer callback error: " << e.what() << std::endl;
-                        return pokemon::TrainerResult{};
-                    }
-                });
+        // Note: Python trainer registration is not fully supported in the unified pattern
+        // since TrainerContext requires a CardDatabase reference. Python trainers should
+        // be implemented in C++ and registered there.
+        .def("register_trainer", [](pokemon::LogicRegistry& /*self*/,
+                                    const std::string& /*card_id*/,
+                                    py::function /*callback*/) {
+            std::cerr << "[LogicRegistry] Python trainer registration not supported. "
+                      << "Implement trainers in C++ using register_trainer_handler()." << std::endl;
         });
 
     // ========================================================================

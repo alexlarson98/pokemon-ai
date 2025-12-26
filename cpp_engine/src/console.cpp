@@ -1103,12 +1103,16 @@ public:
         trainer_card.card_id = card_id;
 
         auto& registry = engine.get_logic_registry();
-        if (!registry.has_trainer(card_id)) {
+        if (!registry.has_trainer_handler(card_id)) {
             std::cout << "Trainer " << card_id << " not registered in registry." << std::endl;
             return;
         }
 
-        auto result = registry.invoke_trainer(card_id, state, trainer_card);
+        // Create a dummy action for the trainer context
+        Action dummy_action = Action::play_item(state.active_player_index, trainer_card.id);
+
+        TrainerContext ctx(state, trainer_card, engine.get_card_database(), dummy_action);
+        auto result = registry.invoke_trainer_handler(card_id, ctx);
 
         std::cout << "Result: " << (result.success ? "SUCCESS" : "FAILED") << std::endl;
         if (!result.effect_description.empty()) {

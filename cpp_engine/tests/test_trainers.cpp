@@ -7,10 +7,17 @@
 #include "cards/effect_builders.hpp"
 #include "game_state.hpp"
 #include "logic_registry.hpp"
+#include "card_database.hpp"
 
 using namespace pokemon;
 using namespace pokemon::trainers;
 using namespace pokemon::effects;
+
+// Helper to create a TrainerContext for tests
+TrainerContext make_test_context(GameState& state, const CardInstance& card,
+                                  const CardDatabase& db, const Action& action) {
+    return TrainerContext(state, card, db, action);
+}
 
 // ============================================================================
 // TRAINER REGISTRY TESTS
@@ -51,9 +58,9 @@ TEST(NestBall, RegistersHandlers) {
     LogicRegistry registry;
     register_nest_ball(registry);
 
-    TEST_ASSERT_TRUE(registry.has_trainer("sv1-181"));
-    TEST_ASSERT_TRUE(registry.has_trainer("sv1-255"));
-    TEST_ASSERT_TRUE(registry.has_trainer("sv4pt5-84"));
+    TEST_ASSERT_TRUE(registry.has_trainer_handler("sv1-181"));
+    TEST_ASSERT_TRUE(registry.has_trainer_handler("sv1-255"));
+    TEST_ASSERT_TRUE(registry.has_trainer_handler("sv4pt5-84"));
 }
 
 TEST(NestBall, ExecuteWithBenchSpace) {
@@ -77,8 +84,13 @@ TEST(NestBall, ExecuteWithBenchSpace) {
     CardInstance nest_ball;
     nest_ball.id = "nest_ball_test";
     nest_ball.card_id = "sv1-181";
-    
-    auto result = registry.invoke_trainer("sv1-181", state, nest_ball);
+
+    // Create context for unified handler
+    CardDatabase db;  // Empty db for test
+    Action action = Action::play_item(0, nest_ball.id);
+    TrainerContext ctx(state, nest_ball, db, action);
+
+    auto result = registry.invoke_trainer_handler("sv1-181", ctx);
 
     TEST_ASSERT_TRUE(result.success);
     TEST_ASSERT_TRUE(result.requires_resolution);
@@ -110,8 +122,13 @@ TEST(NestBall, FailsWithFullBench) {
     CardInstance nest_ball;
     nest_ball.id = "nest_ball_test";
     nest_ball.card_id = "sv1-181";
-    
-    auto result = registry.invoke_trainer("sv1-181", state, nest_ball);
+
+    // Create context for unified handler
+    CardDatabase db;  // Empty db for test
+    Action action = Action::play_item(0, nest_ball.id);
+    TrainerContext ctx(state, nest_ball, db, action);
+
+    auto result = registry.invoke_trainer_handler("sv1-181", ctx);
 
     TEST_ASSERT_FALSE(result.success);
     TEST_ASSERT_EQ(0u, state.resolution_stack.size());

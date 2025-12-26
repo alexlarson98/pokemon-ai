@@ -74,12 +74,64 @@ struct TrainerResult {
 };
 
 /**
- * Action generator result - returns additional legal actions.
+ * Generator mode - indicates how the engine should interpret generator results.
+ *
+ * VALIDITY_CHECK: Generator only checks if card can be played.
+ *                 Engine creates default action (PLAY_ITEM, PLAY_SUPPORTER, etc.)
+ *
+ * ACTION_GENERATION: Generator provides specific actions with targets/parameters.
+ *                    Engine uses generator's actions directly (no default created).
+ *                    Used for cards with visible targets (Rare Candy, Switch, etc.)
+ */
+enum class GeneratorMode : uint8_t {
+    VALIDITY_CHECK,     // Default - just check if playable
+    ACTION_GENERATION   // Generator provides complete actions with targets
+};
+
+/**
+ * Action generator result - returns playability and optional action variants.
  */
 struct GeneratorResult {
     bool valid = true;
     std::string reason;
+
+    // Mode determines how engine interprets this result
+    GeneratorMode mode = GeneratorMode::VALIDITY_CHECK;
+
+    // Only used when mode == ACTION_GENERATION
+    // Each action is a complete PLAY_ITEM/PLAY_SUPPORTER with target info
     std::vector<Action> actions;
+};
+
+// ============================================================================
+// TRAINER CONTEXT
+// ============================================================================
+
+// Forward declaration
+class CardDatabase;
+
+/**
+ * TrainerContext - Unified context for all trainer handlers.
+ *
+ * This provides consistent access to everything a trainer might need:
+ * - Game state (mutable for applying effects)
+ * - The trainer card being played
+ * - Card database for lookups
+ * - The action that triggered this (contains target info if applicable)
+ *
+ * Pattern selection guide:
+ * - IMMEDIATE: No selection needed (Iono, Professor's Research)
+ * - TARGETED: Visible targets, generator provides actions (Rare Candy, Switch)
+ * - SEARCH: Hidden zone selection via resolution stack (Nest Ball, Ultra Ball)
+ */
+struct TrainerContext {
+    GameState& state;
+    const CardInstance& card;
+    const CardDatabase& db;
+    const Action& action;  // Contains target_id/parameters for TARGETED cards
+
+    TrainerContext(GameState& s, const CardInstance& c, const CardDatabase& d, const Action& a)
+        : state(s), card(c), db(d), action(a) {}
 };
 
 // ============================================================================
@@ -101,19 +153,10 @@ using AbilityCallback = std::function<AbilityResult(
     const std::string&
 )>;
 
-// Trainer (Item/Supporter): (state, card) -> TrainerResult
-using TrainerCallback = std::function<TrainerResult(
-    GameState&,
-    const CardInstance&
-)>;
-
-// Trainer with action context: (state, card, action) -> TrainerResult
-// Used when the trainer needs target info from the action (e.g., Rare Candy)
-using TrainerWithActionCallback = std::function<TrainerResult(
-    GameState&,
-    const CardInstance&,
-    const Action&
-)>;
+// Unified trainer handler - ALL trainers use this signature
+// The Action parameter provides target info for TARGETED cards
+// For IMMEDIATE/SEARCH cards, action just identifies the card being played
+using TrainerHandler = std::function<TrainerResult(TrainerContext&)>;
 
 // Action generator: (state, card) -> GeneratorResult
 using GeneratorCallback = std::function<GeneratorResult(
@@ -193,18 +236,30 @@ public:
                          const std::string& ability_name,
                          AbilityCallback callback);
 
-    /**
-     * Register a trainer (Item/Supporter) effect handler.
-     */
-    void register_trainer(const CardDefID& card_id,
-                         TrainerCallback callback);
+    // ========================================================================
+    // TRAINER REGISTRATION
+    // ========================================================================
 
     /**
-     * Register a trainer that needs action context (target info).
-     * Used for cards like Rare Candy that need to know which target was selected.
+     * Register a trainer handler using the unified TrainerContext pattern.
+     *
+     * The handler receives a TrainerContext with state, card, database, and action.
+     *
+     * @param card_id Card definition ID (e.g., "sv1-191")
+     * @param handler Unified handler function
      */
-    void register_trainer_with_action(const CardDefID& card_id,
-                                      TrainerWithActionCallback callback);
+    void register_trainer_handler(const CardDefID& card_id, TrainerHandler handler);
+
+    /**
+     * Check if a trainer handler exists.
+     */
+    bool has_trainer_handler(const CardDefID& card_id) const;
+
+    /**
+     * Invoke trainer handler.
+     */
+    TrainerResult invoke_trainer_handler(const CardDefID& card_id,
+                                         TrainerContext& ctx) const;
 
     /**
      * Register an action generator (for cards with complex choices).
@@ -266,16 +321,6 @@ public:
      */
     bool has_ability(const CardDefID& card_id, const std::string& ability_name) const;
 
-    /**
-     * Check if trainer logic exists.
-     */
-    bool has_trainer(const CardDefID& card_id) const;
-
-    /**
-     * Check if trainer with action logic exists.
-     */
-    bool has_trainer_with_action(const CardDefID& card_id) const;
-
     // ========================================================================
     // INVOCATION
     // ========================================================================
@@ -298,21 +343,6 @@ public:
                                  const std::string& ability_name,
                                  GameState& state,
                                  const CardInstance& pokemon) const;
-
-    /**
-     * Invoke trainer effect.
-     */
-    TrainerResult invoke_trainer(const CardDefID& card_id,
-                                 GameState& state,
-                                 const CardInstance& card) const;
-
-    /**
-     * Invoke trainer effect with action context.
-     */
-    TrainerResult invoke_trainer_with_action(const CardDefID& card_id,
-                                             GameState& state,
-                                             const CardInstance& card,
-                                             const Action& action) const;
 
     /**
      * Invoke action generator.
@@ -426,14 +456,16 @@ public:
 
     size_t attack_count() const { return attacks_.size(); }
     size_t ability_count() const { return abilities_.size(); }
-    size_t trainer_count() const { return trainers_.size(); }
+    size_t trainer_count() const { return trainer_handlers_.size(); }
 
 private:
     // Key: card_id + ":" + name
     std::unordered_map<std::string, AttackCallback> attacks_;
     std::unordered_map<std::string, AbilityCallback> abilities_;
-    std::unordered_map<CardDefID, TrainerCallback> trainers_;
-    std::unordered_map<CardDefID, TrainerWithActionCallback> trainers_with_action_;
+
+    // Trainer handlers
+    std::unordered_map<CardDefID, TrainerHandler> trainer_handlers_;
+
     std::unordered_map<std::string, GeneratorCallback> generators_;
     std::unordered_map<std::string, GuardCallback> guards_;
     std::unordered_map<std::string, ModifierCallback> modifiers_;

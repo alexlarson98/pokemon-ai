@@ -60,22 +60,23 @@ static bool can_play_super_rod(const GameState& state, PlayerID player_id) {
 namespace {
 
 /**
- * Execute Super Rod effect.
+ * Execute Super Rod effect using TrainerContext.
  *
  * Creates a SelectFromZoneStep for the discard pile with:
  * - Filter: Pokemon OR basic Energy (using predicate for clarity)
  * - count=3, min_count=1 (must select at least 1, up to 3)
  * - Purpose: RECOVER_TO_DECK
  */
-TrainerResult execute_super_rod(GameState& state, const CardInstance& card) {
+TrainerResult execute_super_rod(TrainerContext& ctx) {
     TrainerResult result;
+    auto& state = ctx.state;
     PlayerID player_id = state.active_player_index;
 
     // Use predicate filter: Pokemon OR basic Energy
     // This keeps the filter logic with the card, not scattered in engine.cpp
     auto effect_result = effects::shuffle_discard_to_deck(
         state,
-        card,
+        ctx.card,
         player_id,
         super_rod_filter,
         3,      // count: select up to 3
@@ -92,8 +93,9 @@ TrainerResult execute_super_rod(GameState& state, const CardInstance& card) {
 } // anonymous namespace
 
 void register_super_rod(LogicRegistry& registry) {
-    auto handler = [](GameState& state, const CardInstance& card) -> TrainerResult {
-        return execute_super_rod(state, card);
+    // Unified handler using TrainerContext
+    auto handler = [](TrainerContext& ctx) -> TrainerResult {
+        return execute_super_rod(ctx);
     };
 
     auto generator = [](const GameState& state, const CardInstance& card) -> GeneratorResult {
@@ -102,14 +104,16 @@ void register_super_rod(LogicRegistry& registry) {
         if (!result.valid) {
             result.reason = "No Pokemon or basic Energy in discard pile";
         }
+        // SEARCH pattern: VALIDITY_CHECK mode (default)
         return result;
     };
 
-    // Register for all printings
-    registry.register_trainer("sv2-188", handler);
-    registry.register_generator("sv2-188", "trainer", generator);
-    registry.register_trainer("sv2-276", handler);
-    registry.register_generator("sv2-276", "trainer", generator);
+    // Register for all printings using unified handler
+    const std::vector<std::string> card_ids = {"sv2-188", "sv2-276"};
+    for (const auto& id : card_ids) {
+        registry.register_trainer_handler(id, handler);
+        registry.register_generator(id, "trainer", generator);
+    }
 }
 
 } // namespace trainers
