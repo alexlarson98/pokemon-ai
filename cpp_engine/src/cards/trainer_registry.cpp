@@ -48,6 +48,14 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv1-188", "Potion", "item", "Heal 30 damage from 1 Pokemon", false},
     {"sv3-179", "Pal Pad", "item", "Shuffle 2 Supporters from discard to deck", false},
 
+    // Supporters - Implemented
+    {"svp-124", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"sv2-185", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"sv2-254", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"sv2-269", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"sv4pt5-80", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"sv4pt5-237", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+
     // Supporters - Not Yet Implemented
     {"sv1-189", "Professor's Research", "supporter", "Discard hand, draw 7", false},
     {"sv3-181", "Professor's Research", "supporter", "Discard hand, draw 7", false},
@@ -77,6 +85,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_buddy_buddy_poffin(registry);
     register_ultra_ball(registry);
     register_super_rod(registry);
+    register_iono(registry);
     // register_rare_candy(registry);
     // register_switch(registry);
     // ...
