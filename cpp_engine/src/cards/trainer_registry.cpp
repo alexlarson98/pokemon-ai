@@ -60,6 +60,9 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv2-269", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
     {"sv4pt5-80", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
     {"sv4pt5-237", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
+    {"me2-87", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
+    {"me2-118", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
+    {"me2-129", "Dawn", "supporter", "Search deck for Basic, Stage 1, and Stage 2 Pokemon to hand", true},
 
     // Supporters - Not Yet Implemented
     {"sv1-189", "Professor's Research", "supporter", "Discard hand, draw 7", false},
@@ -91,6 +94,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_ultra_ball(registry);
     register_super_rod(registry);
     register_iono(registry);
+    register_dawn(registry);
     register_rare_candy(registry);
     register_night_stretcher(registry);
     // register_switch(registry);
