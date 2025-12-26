@@ -370,10 +370,28 @@ std::vector<Action> PokemonEngine::get_trainer_actions(const GameState& state) c
             }
 
             // Check card-specific playability via generator
-            if (logic_registry_.has_trainer(card.card_id)) {
+            bool has_generator = logic_registry_.has_trainer(card.card_id) ||
+                                 logic_registry_.has_trainer_with_action(card.card_id);
+            if (has_generator) {
                 auto gen_result = logic_registry_.invoke_generator(card.card_id, "trainer", state, card);
                 if (!gen_result.valid) {
                     continue;  // Card cannot be played
+                }
+                // If generator provides specific actions (e.g., Rare Candy with targets),
+                // use those instead of the default PLAY_ITEM action
+                if (!gen_result.actions.empty()) {
+                    for (const auto& gen_action : gen_result.actions) {
+                        // Check for deduplication - use action's full key (card_id + target_id)
+                        std::string action_key = fid;
+                        if (gen_action.target_id.has_value()) {
+                            action_key += ":" + *gen_action.target_id;
+                        }
+                        if (seen_items.find(action_key) == seen_items.end()) {
+                            seen_items.insert(action_key);
+                            actions.push_back(gen_action);
+                        }
+                    }
+                    continue;  // Don't add default action
                 }
             }
 
@@ -962,7 +980,16 @@ void PokemonEngine::apply_play_item(GameState& state, const Action& action) cons
     if (!card_opt.has_value()) return;
 
     // Execute item effect via logic registry
-    if (logic_registry_.has_trainer(card_opt->card_id)) {
+    // Check for trainer with action context first (e.g., Rare Candy)
+    if (logic_registry_.has_trainer_with_action(card_opt->card_id)) {
+        TrainerResult result = logic_registry_.invoke_trainer_with_action(
+            card_opt->card_id, state, *card_opt, action);
+
+        // Push any resolution steps
+        for (auto& step : result.push_steps) {
+            state.push_step(step);
+        }
+    } else if (logic_registry_.has_trainer(card_opt->card_id)) {
         TrainerResult result = logic_registry_.invoke_trainer(
             card_opt->card_id, state, *card_opt);
 

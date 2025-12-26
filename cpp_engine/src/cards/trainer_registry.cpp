@@ -40,8 +40,11 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"sv2-276", "Super Rod", "item", "Shuffle up to 3 Pokemon/Energy from discard to deck", true},
 
     // Items - Not Yet Implemented
-    {"sv1-191", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
-    {"sv4pt5-89", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", false},
+    {"sv1-191", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
+    {"sv1-256", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
+    {"sv4pt5-89", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
+    {"me1-125", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
+    {"me1-175", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
     {"sv1-194", "Switch", "item", "Switch Active with Benched", false},
     {"sv1-171", "Energy Retrieval", "item", "Recover 2 basic Energy from discard", false},
     {"sv3-178", "Night Stretcher", "item", "Recover Pokemon or Energy from discard", false},
@@ -86,7 +89,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_ultra_ball(registry);
     register_super_rod(registry);
     register_iono(registry);
-    // register_rare_candy(registry);
+    register_rare_candy(registry);
     // register_switch(registry);
     // ...
 
@@ -163,9 +166,7 @@ std::optional<TrainerResult> can_play_trainer(
 
 // register_ultra_ball is implemented in ultra_ball.cpp
 
-void register_rare_candy(LogicRegistry& registry) {
-    // TODO: Implement in rare_candy.cpp
-}
+// register_rare_candy is implemented in rare_candy.cpp
 
 void register_switch(LogicRegistry& registry) {
     // TODO: Implement in switch.cpp

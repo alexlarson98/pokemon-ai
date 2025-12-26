@@ -107,6 +107,14 @@ using TrainerCallback = std::function<TrainerResult(
     const CardInstance&
 )>;
 
+// Trainer with action context: (state, card, action) -> TrainerResult
+// Used when the trainer needs target info from the action (e.g., Rare Candy)
+using TrainerWithActionCallback = std::function<TrainerResult(
+    GameState&,
+    const CardInstance&,
+    const Action&
+)>;
+
 // Action generator: (state, card) -> GeneratorResult
 using GeneratorCallback = std::function<GeneratorResult(
     const GameState&,
@@ -192,6 +200,13 @@ public:
                          TrainerCallback callback);
 
     /**
+     * Register a trainer that needs action context (target info).
+     * Used for cards like Rare Candy that need to know which target was selected.
+     */
+    void register_trainer_with_action(const CardDefID& card_id,
+                                      TrainerWithActionCallback callback);
+
+    /**
      * Register an action generator (for cards with complex choices).
      */
     void register_generator(const CardDefID& card_id,
@@ -256,6 +271,11 @@ public:
      */
     bool has_trainer(const CardDefID& card_id) const;
 
+    /**
+     * Check if trainer with action logic exists.
+     */
+    bool has_trainer_with_action(const CardDefID& card_id) const;
+
     // ========================================================================
     // INVOCATION
     // ========================================================================
@@ -285,6 +305,14 @@ public:
     TrainerResult invoke_trainer(const CardDefID& card_id,
                                  GameState& state,
                                  const CardInstance& card) const;
+
+    /**
+     * Invoke trainer effect with action context.
+     */
+    TrainerResult invoke_trainer_with_action(const CardDefID& card_id,
+                                             GameState& state,
+                                             const CardInstance& card,
+                                             const Action& action) const;
 
     /**
      * Invoke action generator.
@@ -405,6 +433,7 @@ private:
     std::unordered_map<std::string, AttackCallback> attacks_;
     std::unordered_map<std::string, AbilityCallback> abilities_;
     std::unordered_map<CardDefID, TrainerCallback> trainers_;
+    std::unordered_map<CardDefID, TrainerWithActionCallback> trainers_with_action_;
     std::unordered_map<std::string, GeneratorCallback> generators_;
     std::unordered_map<std::string, GuardCallback> guards_;
     std::unordered_map<std::string, ModifierCallback> modifiers_;

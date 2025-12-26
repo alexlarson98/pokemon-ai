@@ -32,6 +32,11 @@ void LogicRegistry::register_trainer(const CardDefID& card_id,
     trainers_[card_id] = std::move(callback);
 }
 
+void LogicRegistry::register_trainer_with_action(const CardDefID& card_id,
+                                                  TrainerWithActionCallback callback) {
+    trainers_with_action_[card_id] = std::move(callback);
+}
+
 void LogicRegistry::register_generator(const CardDefID& card_id,
                                        const std::string& logic_type,
                                        GeneratorCallback callback) {
@@ -90,6 +95,10 @@ bool LogicRegistry::has_trainer(const CardDefID& card_id) const {
     return trainers_.find(card_id) != trainers_.end();
 }
 
+bool LogicRegistry::has_trainer_with_action(const CardDefID& card_id) const {
+    return trainers_with_action_.find(card_id) != trainers_with_action_.end();
+}
+
 // ============================================================================
 // INVOCATION
 // ============================================================================
@@ -132,6 +141,20 @@ TrainerResult LogicRegistry::invoke_trainer(const CardDefID& card_id,
 
     if (it != trainers_.end()) {
         return it->second(state, card);
+    }
+
+    // Default: trainer has no special effect
+    return TrainerResult{};
+}
+
+TrainerResult LogicRegistry::invoke_trainer_with_action(const CardDefID& card_id,
+                                                         GameState& state,
+                                                         const CardInstance& card,
+                                                         const Action& action) const {
+    auto it = trainers_with_action_.find(card_id);
+
+    if (it != trainers_with_action_.end()) {
+        return it->second(state, card, action);
     }
 
     // Default: trainer has no special effect
