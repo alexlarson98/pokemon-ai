@@ -803,10 +803,19 @@ def generate_prompt(card_name: str, cards_data: Dict[str, Any]) -> str:
         rules = first_card.get('rules', [])
         full_text = ' '.join(rules).lower()
 
-        # Determine pattern
-        if 'search' in full_text and ('deck' in full_text or 'discard' in full_text):
+        # Determine pattern based on decision framework:
+        # - No player choices → IMMEDIATE
+        # - Visible targets (board, hand, discard) → TARGETED
+        # - Hidden zones (deck, prizes) → SEARCH
+
+        # SEARCH: Deck search (hidden zone) - uses resolution stack
+        if 'search' in full_text and 'deck' in full_text:
             pattern = 'SEARCH'
             pattern_comment = 'SEARCH pattern: Uses resolution stack for hidden zone selection'
+        # TARGETED: Selection from visible zones (discard pile, bench, hand)
+        elif 'from your discard pile' in full_text or 'from your hand' in full_text:
+            pattern = 'TARGETED'
+            pattern_comment = 'TARGETED pattern: Generator provides actions with visible targets (discard pile is public)'
         elif any(word in full_text for word in ['switch', 'evolve', 'attach', 'move']):
             pattern = 'TARGETED'
             pattern_comment = 'TARGETED pattern: Generator provides actions with visible targets'

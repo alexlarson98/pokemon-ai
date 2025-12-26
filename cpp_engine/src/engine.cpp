@@ -647,7 +647,10 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
                         seen_functional_ids.insert(fid);
                     }
 
-                    actions.push_back(Action::select_card(s.player_id, card.id));
+                    // Only allow selection if count not yet reached
+                    if (static_cast<int>(s.selected_card_ids.size()) < s.count) {
+                        actions.push_back(Action::select_card(s.player_id, card.id));
+                    }
                 }
             }
 

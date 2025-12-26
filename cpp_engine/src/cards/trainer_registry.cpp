@@ -47,7 +47,9 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"me1-175", "Rare Candy", "item", "Evolve Basic to Stage 2 directly", true},
     {"sv1-194", "Switch", "item", "Switch Active with Benched", false},
     {"sv1-171", "Energy Retrieval", "item", "Recover 2 basic Energy from discard", false},
-    {"sv3-178", "Night Stretcher", "item", "Recover Pokemon or Energy from discard", false},
+    {"sv6pt5-61", "Night Stretcher", "item", "Put Pokemon or basic Energy from discard to hand", true},
+    {"sv8-251", "Night Stretcher", "item", "Put Pokemon or basic Energy from discard to hand", true},
+    {"me1-173", "Night Stretcher", "item", "Put Pokemon or basic Energy from discard to hand", true},
     {"sv1-188", "Potion", "item", "Heal 30 damage from 1 Pokemon", false},
     {"sv3-179", "Pal Pad", "item", "Shuffle 2 Supporters from discard to deck", false},
 
@@ -90,6 +92,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_super_rod(registry);
     register_iono(registry);
     register_rare_candy(registry);
+    register_night_stretcher(registry);
     // register_switch(registry);
     // ...
 
@@ -186,9 +189,7 @@ void register_professors_letter(LogicRegistry& registry) {
     // TODO: Implement in professors_letter.cpp
 }
 
-void register_night_stretcher(LogicRegistry& registry) {
-    // TODO: Implement in night_stretcher.cpp
-}
+// register_night_stretcher is implemented in night_stretcher.cpp
 
 void register_max_potion(LogicRegistry& registry) {
     // TODO: Implement in max_potion.cpp

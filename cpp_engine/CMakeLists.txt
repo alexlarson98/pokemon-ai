@@ -59,6 +59,7 @@ add_library(pokemon_engine_core STATIC
     src/cards/trainers/items/ultra_ball.cpp
     src/cards/trainers/items/super_rod.cpp
     src/cards/trainers/items/rare_candy.cpp
+    src/cards/trainers/items/night_stretcher.cpp
     src/cards/trainers/supporters/iono.cpp
 )
 

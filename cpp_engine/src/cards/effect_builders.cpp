@@ -505,6 +505,19 @@ EffectResult recover_from_discard(
     step.min_count = min_count;
     step.filter_criteria = filter;
 
+    // Set completion callback to move selected cards from discard to hand
+    step.on_complete = CompletionCallback([](GameState& state, const std::vector<CardID>& selected_cards, PlayerID pid) {
+        auto& player_state = state.get_player(pid);
+
+        // Move selected cards from discard to hand
+        for (const auto& card_id : selected_cards) {
+            auto card_opt = player_state.discard.take_card(card_id);
+            if (card_opt.has_value()) {
+                player_state.hand.add_card(std::move(*card_opt));
+            }
+        }
+    });
+
     state.push_step(step);
 
     result.success = true;
