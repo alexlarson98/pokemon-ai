@@ -89,6 +89,88 @@ void LogicRegistry::register_passive(const CardDefID& card_id,
 }
 
 // ============================================================================
+// STADIUM REGISTRATION AND INVOCATION
+// ============================================================================
+
+void LogicRegistry::register_stadium(const CardDefID& card_id, StadiumHandler handler) {
+    stadium_handlers_[card_id] = std::move(handler);
+}
+
+bool LogicRegistry::has_stadium_handler(const CardDefID& card_id) const {
+    return stadium_handlers_.find(card_id) != stadium_handlers_.end();
+}
+
+const StadiumHandler* LogicRegistry::get_stadium_handler(const CardDefID& card_id) const {
+    auto it = stadium_handlers_.find(card_id);
+    if (it != stadium_handlers_.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+StadiumResult LogicRegistry::invoke_stadium_on_enter(const CardDefID& card_id,
+                                                      StadiumContext& ctx) const {
+    auto it = stadium_handlers_.find(card_id);
+    if (it != stadium_handlers_.end() && it->second.on_enter) {
+        return it->second.on_enter(ctx);
+    }
+    // Default: no special on-enter effect
+    StadiumResult result;
+    result.success = true;
+    return result;
+}
+
+StadiumResult LogicRegistry::invoke_stadium_on_leave(const CardDefID& card_id,
+                                                      StadiumContext& ctx,
+                                                      PlayerID new_stadium_owner) const {
+    auto it = stadium_handlers_.find(card_id);
+    if (it != stadium_handlers_.end() && it->second.on_leave) {
+        return it->second.on_leave(ctx, new_stadium_owner);
+    }
+    // Default: no special on-leave effect
+    StadiumResult result;
+    result.success = true;
+    return result;
+}
+
+int LogicRegistry::get_stadium_bench_size(const GameState& state,
+                                           const CardDatabase& db,
+                                           PlayerID player_id) const {
+    // Default bench size
+    constexpr int DEFAULT_BENCH_SIZE = 5;
+
+    // Check if there's a stadium in play with a bench size modifier
+    if (!state.stadium.has_value()) {
+        return DEFAULT_BENCH_SIZE;
+    }
+
+    const auto& stadium_card = state.stadium.value();
+    auto it = stadium_handlers_.find(stadium_card.card_id);
+    if (it != stadium_handlers_.end() && it->second.bench_size) {
+        return it->second.bench_size(state, db, player_id);
+    }
+
+    return DEFAULT_BENCH_SIZE;
+}
+
+bool LogicRegistry::check_stadium_condition(const GameState& state,
+                                             const CardDatabase& db,
+                                             PlayerID player_id) const {
+    // Check if there's a stadium in play with a condition
+    if (!state.stadium.has_value()) {
+        return false;
+    }
+
+    const auto& stadium_card = state.stadium.value();
+    auto it = stadium_handlers_.find(stadium_card.card_id);
+    if (it != stadium_handlers_.end() && it->second.condition) {
+        return it->second.condition(state, db, player_id);
+    }
+
+    return false;
+}
+
+// ============================================================================
 // LOOKUP
 // ============================================================================
 

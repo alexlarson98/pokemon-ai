@@ -88,6 +88,7 @@ void register_marnie(LogicRegistry& registry);
 // Stadiums
 void register_training_court(LogicRegistry& registry);
 void register_artazon(LogicRegistry& registry);
+void register_area_zero_underdepths(LogicRegistry& registry);
 
 // Tools
 void register_exp_share(LogicRegistry& registry);

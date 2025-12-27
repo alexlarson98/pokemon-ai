@@ -216,6 +216,20 @@ private:
                    const CardDef& evolution) const;
 
     // ========================================================================
+    // STADIUM EFFECTS
+    // ========================================================================
+
+    /**
+     * Update bench sizes for both players based on current stadium.
+     *
+     * Called when:
+     * - A new stadium is played
+     * - A stadium is discarded
+     * - At the start of each turn (to re-evaluate conditions)
+     */
+    void update_bench_sizes(GameState& state) const;
+
+    // ========================================================================
     // FILTER CRITERIA MATCHING
     // ========================================================================
 

@@ -200,6 +200,104 @@ using PassiveConditionCallback = std::function<bool(
 )>;
 
 // ============================================================================
+// STADIUM CALLBACKS
+// ============================================================================
+
+// Forward declaration
+class CardDatabase;
+
+/**
+ * StadiumContext - Context passed to stadium callbacks.
+ *
+ * Provides access to game state, the stadium card, card database,
+ * and the player who played/owns the stadium.
+ */
+struct StadiumContext {
+    GameState& state;
+    const CardInstance& stadium_card;
+    const CardDatabase& db;
+    PlayerID stadium_owner_id;  // Player who originally played this stadium
+
+    StadiumContext(GameState& s, const CardInstance& c, const CardDatabase& d, PlayerID owner)
+        : state(s), stadium_card(c), db(d), stadium_owner_id(owner) {}
+};
+
+/**
+ * StadiumResult - Result of a stadium effect (on_enter or on_leave).
+ */
+struct StadiumResult {
+    bool success = false;
+    bool requires_resolution = false;  // True if resolution steps were pushed
+    std::string effect_description;
+};
+
+/**
+ * Stadium on_enter callback - Called when stadium is played.
+ * Use for immediate effects when stadium enters play.
+ */
+using StadiumOnEnterCallback = std::function<StadiumResult(StadiumContext&)>;
+
+/**
+ * Stadium on_leave callback - Called when stadium is replaced or discarded.
+ * Use for cleanup effects (e.g., Area Zero forcing bench discard).
+ * The new_stadium_owner is the player who is replacing this stadium (or -1 if none).
+ */
+using StadiumOnLeaveCallback = std::function<StadiumResult(
+    StadiumContext&,
+    PlayerID new_stadium_owner  // Player replacing this stadium (-1 if forced discard)
+)>;
+
+/**
+ * Stadium bench size modifier - Returns max bench size for a player.
+ * Called continuously when checking bench limits.
+ *
+ * @param state Current game state
+ * @param db Card database for lookups
+ * @param player_id Player to check bench size for
+ * @return Max bench size (5 is default, 8 for Area Zero with Tera)
+ */
+using StadiumBenchSizeCallback = std::function<int(
+    const GameState&,
+    const CardDatabase&,
+    PlayerID
+)>;
+
+/**
+ * Stadium continuous check callback - Called to verify stadium conditions.
+ * Used for stadiums that need to check conditions continuously
+ * (e.g., Area Zero checking if player still has Tera Pokemon).
+ *
+ * @param state Current game state
+ * @param db Card database for lookups
+ * @param player_id Player to check for
+ * @return True if player meets the condition for this stadium's benefit
+ */
+using StadiumConditionCallback = std::function<bool(
+    const GameState&,
+    const CardDatabase&,
+    PlayerID
+)>;
+
+/**
+ * StadiumHandler - Complete handler for a stadium card.
+ *
+ * Stadiums can have multiple effect types:
+ * - on_enter: Immediate effect when played
+ * - on_leave: Cleanup effect when replaced
+ * - bench_size: Continuous modifier for bench limits
+ * - condition_check: Check if player qualifies for stadium benefit
+ */
+struct StadiumHandler {
+    StadiumOnEnterCallback on_enter;      // Optional: effect when stadium is played
+    StadiumOnLeaveCallback on_leave;      // Optional: effect when stadium is replaced
+    StadiumBenchSizeCallback bench_size;  // Optional: max bench size calculator
+    StadiumConditionCallback condition;   // Optional: condition check for benefits
+
+    // Metadata
+    std::string name;  // Stadium name for display
+};
+
+// ============================================================================
 // LOGIC REGISTRY
 // ============================================================================
 
@@ -306,6 +404,52 @@ public:
                          const std::string& ability_name,
                          PassiveConditionCallback condition_callback,
                          PassiveCallback effect_callback);
+
+    // ========================================================================
+    // STADIUM REGISTRATION
+    // ========================================================================
+
+    /**
+     * Register a stadium handler with all its callbacks.
+     *
+     * @param card_id Card definition ID (e.g., "sv7-131" for Area Zero)
+     * @param handler Complete stadium handler with callbacks
+     */
+    void register_stadium(const CardDefID& card_id, StadiumHandler handler);
+
+    /**
+     * Check if a stadium handler exists.
+     */
+    bool has_stadium_handler(const CardDefID& card_id) const;
+
+    /**
+     * Get stadium handler (returns nullptr if not found).
+     */
+    const StadiumHandler* get_stadium_handler(const CardDefID& card_id) const;
+
+    /**
+     * Invoke stadium on_enter effect.
+     */
+    StadiumResult invoke_stadium_on_enter(const CardDefID& card_id, StadiumContext& ctx) const;
+
+    /**
+     * Invoke stadium on_leave effect.
+     */
+    StadiumResult invoke_stadium_on_leave(const CardDefID& card_id, StadiumContext& ctx,
+                                          PlayerID new_stadium_owner) const;
+
+    /**
+     * Get max bench size for a player, considering current stadium.
+     * Returns 5 (default) if no stadium modifies bench size.
+     */
+    int get_stadium_bench_size(const GameState& state, const CardDatabase& db,
+                               PlayerID player_id) const;
+
+    /**
+     * Check if player meets stadium condition for benefits.
+     */
+    bool check_stadium_condition(const GameState& state, const CardDatabase& db,
+                                 PlayerID player_id) const;
 
     // ========================================================================
     // LOOKUP
@@ -457,6 +601,7 @@ public:
     size_t attack_count() const { return attacks_.size(); }
     size_t ability_count() const { return abilities_.size(); }
     size_t trainer_count() const { return trainer_handlers_.size(); }
+    size_t stadium_count() const { return stadium_handlers_.size(); }
 
 private:
     // Key: card_id + ":" + name
@@ -477,6 +622,9 @@ private:
         PassiveCallback effect;
     };
     std::unordered_map<std::string, PassiveEntry> passives_;
+
+    // Stadium handlers (e.g., Area Zero Underdepths)
+    std::unordered_map<CardDefID, StadiumHandler> stadium_handlers_;
 
     // Helper to make composite key
     static std::string make_key(const CardDefID& card_id, const std::string& name) {

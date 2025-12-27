@@ -60,9 +60,12 @@ add_library(pokemon_engine_core STATIC
     src/cards/trainers/items/super_rod.cpp
     src/cards/trainers/items/rare_candy.cpp
     src/cards/trainers/items/night_stretcher.cpp
+    src/cards/trainers/items/prime_catcher.cpp
     src/cards/trainers/supporters/iono.cpp
     src/cards/trainers/supporters/dawn.cpp
     src/cards/trainers/supporters/boss_orders.cpp
+    src/cards/trainers/supporters/briar.cpp
+    src/cards/trainers/stadiums/area_zero_underdepths.cpp
 )
 
 target_include_directories(pokemon_engine_core

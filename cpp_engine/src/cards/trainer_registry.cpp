@@ -80,6 +80,11 @@ std::vector<TrainerInfo> g_trainer_info = {
 
     // Stadiums - Not Yet Implemented
     {"sv1-169", "Artazon", "stadium", "Once per turn, search Basic non-Rule Box Pokemon", false},
+
+    // Stadiums - Implemented
+    {"sv7-131", "Area Zero Underdepths", "stadium", "If player has Tera Pokemon, bench holds 8 instead of 5", true},
+    {"sv7-174", "Area Zero Underdepths", "stadium", "If player has Tera Pokemon, bench holds 8 instead of 5", true},
+    {"sv8pt5-94", "Area Zero Underdepths", "stadium", "If player has Tera Pokemon, bench holds 8 instead of 5", true},
 };
 
 bool g_registry_initialized = false;
@@ -107,6 +112,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_rare_candy(registry);
     register_night_stretcher(registry);
     register_prime_catcher(registry);
+    register_area_zero_underdepths(registry);
     // register_switch(registry);
     // ...
 

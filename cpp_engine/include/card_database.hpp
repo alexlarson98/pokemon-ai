@@ -133,6 +133,10 @@ struct CardDef {
         return std::find(subtypes.begin(), subtypes.end(), Subtype::TOOL) != subtypes.end();
     }
 
+    bool is_tera() const {
+        return std::find(subtypes.begin(), subtypes.end(), Subtype::TERA) != subtypes.end();
+    }
+
     // Check if this card can evolve from another
     bool can_evolve_from(const std::string& pokemon_name) const {
         return evolves_from.has_value() && *evolves_from == pokemon_name;

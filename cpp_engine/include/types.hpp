@@ -144,7 +144,8 @@ enum class SelectionPurpose : uint8_t {
     SWITCH_TARGET,
     RECOVER_TO_DECK,
     RECOVER_TO_HAND,
-    DISCARD_FROM_PLAY
+    DISCARD_FROM_PLAY,
+    BENCH_OVERFLOW_DISCARD  // Select Pokemon to discard when bench exceeds limit
 };
 
 enum class ZoneType : uint8_t {

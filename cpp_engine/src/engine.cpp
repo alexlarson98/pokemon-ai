@@ -869,6 +869,9 @@ void PokemonEngine::apply_play_basic(GameState& state, const Action& action) con
     // Add to bench
     player.board.add_to_bench(std::move(*card_opt));
 
+    // Re-evaluate bench sizes (placing a Tera Pokemon may expand bench to 8)
+    update_bench_sizes(state);
+
     // Trigger on_play hooks for the newly placed Pokemon
     // This is for abilities like Flamigo's Insta-Flock
     if (def) {
@@ -1078,14 +1081,30 @@ void PokemonEngine::apply_play_stadium(GameState& state, const Action& action) c
     auto card_opt = player.hand.take_card(*action.card_id);
     if (!card_opt.has_value()) return;
 
-    // Discard old stadium
+    // Invoke on_leave for old stadium (if any)
     if (state.stadium.has_value()) {
-        PlayerID stadium_owner = state.stadium->owner_id;
-        state.get_player(stadium_owner).discard.add_card(std::move(*state.stadium));
+        const CardID& old_stadium_id = state.stadium->card_id;
+        PlayerID old_stadium_owner = state.stadium->owner_id;
+
+        // Create context for old stadium
+        StadiumContext leave_ctx(state, *state.stadium, card_db_, old_stadium_owner);
+        logic_registry_.invoke_stadium_on_leave(old_stadium_id, leave_ctx, action.player_id);
+
+        // Discard old stadium
+        state.get_player(old_stadium_owner).discard.add_card(std::move(*state.stadium));
     }
 
+    // Set new stadium
+    card_opt->owner_id = action.player_id;
     state.stadium = std::move(*card_opt);
     player.stadium_played_this_turn = true;
+
+    // Invoke on_enter for new stadium
+    StadiumContext enter_ctx(state, *state.stadium, card_db_, action.player_id);
+    logic_registry_.invoke_stadium_on_enter(state.stadium->card_id, enter_ctx);
+
+    // Update bench sizes for both players based on new stadium
+    update_bench_sizes(state);
 }
 
 void PokemonEngine::apply_attach_tool(GameState& state, const Action& action) const {
@@ -1419,6 +1438,10 @@ void PokemonEngine::start_turn(GameState& state) const {
 
     // Reset turn flags
     player.reset_turn_flags();
+
+    // Re-evaluate bench sizes at start of turn
+    // This catches scenarios where Tera Pokemon were KO'd last turn
+    update_bench_sizes(state);
 
     // Draw a card (except turn 1)
     if (!player.deck.is_empty()) {
@@ -1797,6 +1820,67 @@ bool PokemonEngine::card_matches_filter(
     }
 
     return true;
+}
+
+// ============================================================================
+// STADIUM EFFECTS
+// ============================================================================
+
+void PokemonEngine::update_bench_sizes(GameState& state) const {
+    constexpr int DEFAULT_BENCH_SIZE = 5;
+
+    for (int player_id = 0; player_id < 2; ++player_id) {
+        auto& player = state.get_player(player_id);
+
+        // Get bench size from stadium (if any)
+        int new_bench_size = logic_registry_.get_stadium_bench_size(state, card_db_, player_id);
+
+        // Handle bench shrinking: if reducing size and bench is over capacity,
+        // the excess Pokemon must be discarded (player chooses which ones)
+        int excess_count = player.board.get_bench_count() - new_bench_size;
+        if (excess_count > 0) {
+            // Push resolution step for player to choose which Pokemon to discard
+            SelectFromZoneStep step;
+            step.source_card_id = state.stadium.has_value() ? state.stadium->id : "";
+            step.source_card_name = "Bench Overflow";
+            step.player_id = player_id;
+            step.purpose = SelectionPurpose::BENCH_OVERFLOW_DISCARD;
+            step.zone = ZoneType::BENCH;
+            step.count = excess_count;
+            step.min_count = excess_count;
+            step.exact_count = true;
+
+            // Completion callback to discard selected Pokemon
+            step.on_complete = CompletionCallback([](
+                GameState& callback_state,
+                const std::vector<CardID>& selected_cards,
+                PlayerID callback_player_id
+            ) {
+                auto& callback_player = callback_state.get_player(callback_player_id);
+
+                for (const auto& card_id : selected_cards) {
+                    // Find and remove Pokemon from bench
+                    auto pokemon_opt = callback_player.board.remove_from_bench(card_id);
+                    if (pokemon_opt.has_value()) {
+                        // Discard attached energy
+                        for (auto& energy : pokemon_opt->attached_energy) {
+                            callback_player.discard.add_card(std::move(energy));
+                        }
+                        // Discard attached tools
+                        for (auto& tool : pokemon_opt->attached_tools) {
+                            callback_player.discard.add_card(std::move(tool));
+                        }
+                        // Discard the Pokemon itself
+                        callback_player.discard.add_card(std::move(*pokemon_opt));
+                    }
+                }
+            });
+
+            state.push_step(step);
+        }
+
+        player.board.max_bench_size = new_bench_size;
+    }
 }
 
 } // namespace pokemon

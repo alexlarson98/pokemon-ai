@@ -509,7 +509,7 @@ void show_state_for_player(const GameState& state, int player_id,
 
     // Player's bench
     if (!player.board.bench.empty()) {
-        std::cout << "|  Bench (" << player.board.bench.size() << "/5):" << std::endl;
+        std::cout << "|  Bench (" << player.board.bench.size() << "/" << player.board.max_bench_size << "):" << std::endl;
         for (size_t i = 0; i < player.board.bench.size(); i++) {
             const auto& b = player.board.bench[i];
             auto it = name_map.find(b.card_id);
