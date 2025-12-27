@@ -66,6 +66,10 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"me1-114", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
     {"sv1-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
     {"sv4-172", "Boss's Orders", "supporter", "Switch opponent's Active with Benched", true},
+    {"sv7-132", "Briar", "supporter", "If Tera Pokemon KOs opponent's Active, take +1 Prize (requires opp has 2 prizes)", true},
+    {"sv7-163", "Briar", "supporter", "If Tera Pokemon KOs opponent's Active, take +1 Prize (requires opp has 2 prizes)", true},
+    {"sv7-171", "Briar", "supporter", "If Tera Pokemon KOs opponent's Active, take +1 Prize (requires opp has 2 prizes)", true},
+    {"sv8pt5-100", "Briar", "supporter", "If Tera Pokemon KOs opponent's Active, take +1 Prize (requires opp has 2 prizes)", true},
 
     // Supporters - Not Yet Implemented
     {"sv1-189", "Professor's Research", "supporter", "Discard hand, draw 7", false},
@@ -97,6 +101,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_iono(registry);
     register_dawn(registry);
     register_boss_orders(registry);
+    register_briar(registry);
     register_rare_candy(registry);
     register_night_stretcher(registry);
     // register_switch(registry);

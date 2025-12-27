@@ -79,6 +79,7 @@ void register_escape_rope(LogicRegistry& registry);
 void register_iono(LogicRegistry& registry);
 void register_dawn(LogicRegistry& registry);
 void register_boss_orders(LogicRegistry& registry);
+void register_briar(LogicRegistry& registry);
 void register_professors_research(LogicRegistry& registry);
 void register_judge(LogicRegistry& registry);
 void register_marnie(LogicRegistry& registry);
