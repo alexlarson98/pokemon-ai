@@ -629,6 +629,27 @@ std::vector<Action> PokemonEngine::get_resolution_stack_actions(const GameState&
             // Generate select actions for each valid card
             const auto& player = state.get_player(s.player_id);
 
+            // Handle BENCH specially since it's not a Zone type
+            if (s.zone == ZoneType::BENCH) {
+                // Generate select actions for bench Pokemon
+                for (const auto& pokemon : player.board.bench) {
+                    // Skip excluded cards
+                    bool excluded = std::find(s.exclude_card_ids.begin(),
+                        s.exclude_card_ids.end(), pokemon.id) != s.exclude_card_ids.end();
+                    if (excluded) continue;
+
+                    // Skip already selected cards
+                    bool selected = std::find(s.selected_card_ids.begin(),
+                        s.selected_card_ids.end(), pokemon.id) != s.selected_card_ids.end();
+                    if (selected) continue;
+
+                    // Only allow selection if count not yet reached
+                    if (static_cast<int>(s.selected_card_ids.size()) < s.count) {
+                        actions.push_back(Action::select_card(s.player_id, pokemon.id));
+                    }
+                }
+            }
+
             const Zone* zone = nullptr;
             switch (s.zone) {
                 case ZoneType::HAND: zone = &player.hand; break;

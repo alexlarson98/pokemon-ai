@@ -74,6 +74,7 @@ void register_full_heal(LogicRegistry& registry);
 void register_pokegear(LogicRegistry& registry);
 void register_pal_pad(LogicRegistry& registry);
 void register_escape_rope(LogicRegistry& registry);
+void register_prime_catcher(LogicRegistry& registry);
 
 // Supporters
 void register_iono(LogicRegistry& registry);

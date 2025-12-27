@@ -52,6 +52,8 @@ std::vector<TrainerInfo> g_trainer_info = {
     {"me1-173", "Night Stretcher", "item", "Put Pokemon or basic Energy from discard to hand", true},
     {"sv1-188", "Potion", "item", "Heal 30 damage from 1 Pokemon", false},
     {"sv3-179", "Pal Pad", "item", "Shuffle 2 Supporters from discard to deck", false},
+    {"sv5-157", "Prime Catcher", "item", "Switch opponent's Active with Benched, then switch your Active with Benched (ACE SPEC)", true},
+    {"sv8pt5-119", "Prime Catcher", "item", "Switch opponent's Active with Benched, then switch your Active with Benched (ACE SPEC)", true},
 
     // Supporters - Implemented
     {"svp-124", "Iono", "supporter", "Both shuffle hands to deck bottom, draw for prizes", true},
@@ -104,6 +106,7 @@ void register_all_trainers(LogicRegistry& registry) {
     register_briar(registry);
     register_rare_candy(registry);
     register_night_stretcher(registry);
+    register_prime_catcher(registry);
     // register_switch(registry);
     // ...
 
